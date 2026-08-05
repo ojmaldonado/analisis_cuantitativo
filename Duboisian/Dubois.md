@@ -310,6 +310,7 @@ ggplot(filter(dane_long, div_corto == "Alimentos"),
        x = NULL, y = "Ponderación de alimentos") +
   theme_dubois
 ```
+![Plate 1](05_dane_alimentos.png)
 
 **b) Composición completa del gasto** — el análogo colombiano de la Lámina 31:
 
@@ -336,6 +337,7 @@ ggplot(dane_long, aes(clase, pct, fill = div_corto)) +
   theme_dubois +
   theme(legend.text = element_text(size = 8))
 ```
+![Plate 2](06_dane_composicion.png)
 
 **c) ¿Qué sube y qué baja con el ingreso?** (necesidades vs. discrecionales):
 
@@ -351,6 +353,7 @@ ggplot(cambio, aes(reorder(div_corto, delta), delta, fill = tipo)) +
        x = NULL, y = "Ingresos Altos − Pobres") +
   theme_dubois
 ```
+![Plate 3](07_dane_diverging.png)
 
 ## Preguntas de cierre del Ejercicio 2
 

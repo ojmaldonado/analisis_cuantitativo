@@ -95,7 +95,7 @@ theme_dubois <- theme_minimal(base_size = 12) +
         legend.position  = "bottom")
 ```
 
-> **Datos del taller.** Coloque los dos archivos en una subcarpeta `datos/`
+> **Datos del taller.** Coloque los dos archivos en una subcarpeta `datos/o identifique la ruta de descargas`
 > junto a este `.Rmd`: `data_dubois.csv` y
 > `distribucion_gasto_por_clase_social.csv`.
 

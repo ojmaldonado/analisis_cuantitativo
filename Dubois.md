@@ -1,5 +1,4 @@
----
-#Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad
+# Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad
 
 # Presentación
 

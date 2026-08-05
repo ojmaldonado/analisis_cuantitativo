@@ -1,20 +1,6 @@
-title: "Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad"
-subtitle: "Ingreso, costo de vida y la Ley de Engel: de Atlanta (1900) a Colombia"
-author: "Curso de Análisis Cuantitativo — Escuela de Ciencias Humanas, Universidad del Rosario"
-date: "`r format(Sys.Date(), '%d de %B de %Y')`"
-output:
-  html_document:
-    toc: true
-    toc_float: true
-    number_sections: true
-    theme: journal
-    highlight: tango
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
-                      fig.width = 8, fig.height = 5, dpi = 110)
-```
+# "Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad"
+Ingreso, costo de vida y la Ley de Engel: de Atlanta (1900) a Colombia.
+Curso de Análisis Cuantitativo — ESPI, Universidad del Rosario"
 
 # Presentación
 

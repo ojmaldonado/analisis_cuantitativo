@@ -1,4 +1,20 @@
-# Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad
+title: "Taller · W.E.B. Du Bois y el análisis cuantitativo de la sociedad"
+subtitle: "Ingreso, costo de vida y la Ley de Engel: de Atlanta (1900) a Colombia"
+author: "Curso de Análisis Cuantitativo — Escuela de Ciencias Humanas, Universidad del Rosario"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: journal
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 8, fig.height = 5, dpi = 110)
+```
 
 # Presentación
 
@@ -64,6 +80,7 @@ Instale (una sola vez) y cargue los paquetes. Trabajaremos con el `tidyverse`.
 ```{r paquetes}
 # install.packages(c("tidyverse","scales"))  # <- ejecutar solo la primera vez
 install.packages("readr")
+install.packages("dplyr")
 library(readr)    # leer datos
 library(dplyr)    # transformar
 library(tidyr)    # ordenar (formato largo/ancho)
@@ -106,7 +123,7 @@ ingreso anual**, la tabla registra el porcentaje del gasto destinado a
 **Otros gastos y Ahorro (Other)**.
 
 ```{r datos-dubois}
-db <- read_csv("datos/data_dubois.csv", show_col_types = FALSE) |>
+db <- read_csv("/Users/oscar/Downloads/data_dubois.csv", show_col_types = FALSE) |>
   rename(clase = Class, promedio = `Actual Average`,
          Vivienda = Rent, Alimentos = Food, Vestido = Clothes,
          Impuestos = Tax, `Otros/Ahorro` = Other)
@@ -225,7 +242,7 @@ archivo desagrega esas ponderaciones (por divisiones COICOP) en cuatro clases:
 ## Paso 1 — Cargar y ordenar los datos del DANE
 
 ```{r cargar-dane}
-dane <- read_csv("datos/distribucion_gasto_por_clase_social.csv",
+dane <- read_csv("/Users/oscar/Downloads/distribucion_gasto_por_clase_social.csv",
                  show_col_types = FALSE)
 names(dane)[1] <- "division"   # normaliza el nombre de la 1a columna (trae BOM)
 

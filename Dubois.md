@@ -170,6 +170,7 @@ ggplot(db_long, aes(fct_rev(clase), pct, fill = categoria)) +
        x = "Clase de ingreso anual (USD)", y = NULL) +
   theme_dubois
 ```
+![Plate 1](01_dubois_barras.png)
 
 ## Paso 3 — Visualizar la Ley de Engel
 
@@ -185,6 +186,7 @@ ggplot(db, aes(promedio, Alimentos)) +
        x = "Ingreso anual promedio", y = "% del gasto en alimentos") +
   theme_dubois
 ```
+![Plate 1](02_engel_dubois.png)
 
 Y el contraste directo entre **alimentos** (baja) y **otros gastos/ahorro** (sube):
 
@@ -201,6 +203,7 @@ ggplot(filter(db_long, categoria %in% c("Alimentos", "Otros/Ahorro")),
   theme_dubois +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 ```
+![Plate 1](01_dubois_barras.png)
 
 ## Preguntas de cierre del Ejercicio 1
 

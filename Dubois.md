@@ -203,7 +203,7 @@ ggplot(filter(db_long, categoria %in% c("Alimentos", "Otros/Ahorro")),
   theme_dubois +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 ```
-![Plate 1](01_dubois_barras.png)
+![Plate 1](Engel03.png)
 
 ## Preguntas de cierre del Ejercicio 1
 

@@ -1,1 +1,1 @@
-#Taller sobre conceptualización y variables estadísticas
+Taller sobre conceptualización y variables estadísticas

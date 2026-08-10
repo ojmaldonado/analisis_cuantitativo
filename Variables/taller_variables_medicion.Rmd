@@ -1,0 +1,319 @@
+---
+title: "Tipos de variables y niveles de medición en Ciencias Sociales"
+subtitle: "Taller de Análisis Cuantitativo"
+author: "Curso de Análisis Cuantitativo"
+date: "`r format(Sys.Date())`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: readable
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, message = FALSE, warning = FALSE,
+  fig.width = 6, fig.height = 4, fig.align = "center"
+)
+library(tidyverse)
+library(knitr)
+theme_set(theme_minimal(base_size = 12))
+```
+
+# Presentación
+
+Este taller ilustra los **tipos de variables estadísticas** y los **niveles de
+medición** (nominal, ordinal, intervalo y razón) con datos reales. La idea de
+fondo es que *el nivel de medición no es una propiedad del concepto sino de su
+operacionalización*: la manera en que decidimos medir una variable determina qué
+estadísticos descriptivos y qué visualizaciones son legítimos.
+
+Usamos dos bases del experimento natural sobre la TV rusa en Ucrania. Un mismo
+concepto —el **apoyo pro-ruso**— aparece medido de dos formas distintas según la
+**unidad de análisis**:
+
+- `UA_precincts.csv`: **precintos electorales** (unidad agregada / ecológica). El
+  apoyo pro-ruso es un **porcentaje continuo**.
+- `UA_survey.csv`: **personas encuestadas** (unidad individual). El apoyo pro-ruso
+  es una respuesta **binaria** (votó / no votó).
+
+> Coloca los dos `.csv` en la misma carpeta que este `.Rmd` antes de tejer.
+
+```{r cargar-datos}
+precincts <- read_csv("UA_precincts.csv")
+survey    <- read_csv("UA_survey.csv")
+
+glimpse(precincts)
+glimpse(survey)
+```
+
+## Etiquetado de las categorías
+
+Las variables categóricas vienen codificadas como `0/1`. Antes de describirlas
+conviene convertirlas en **factores** con etiquetas legibles: esto le comunica a
+R que son cualitativas y no números con los que tenga sentido hacer aritmética.
+
+```{r factores}
+precincts <- precincts %>%
+  mutate(
+    russian_tv_f  = factor(russian_tv,  levels = c(0, 1),
+                           labels = c("Sin TV rusa", "Con TV rusa")),
+    within_25km_f = factor(within_25km, levels = c(0, 1),
+                           labels = c("Lejos (>25 km)", "Cerca (<=25 km)"))
+  )
+
+survey <- survey %>%
+  mutate(
+    russian_tv_f       = factor(russian_tv, levels = c(0, 1),
+                                labels = c("Sin TV rusa", "Con TV rusa")),
+    within_25km_f      = factor(within_25km, levels = c(0, 1),
+                                labels = c("Lejos (>25 km)", "Cerca (<=25 km)")),
+    pro_russian_vote_f = factor(pro_russian_vote, levels = c(0, 1),
+                                labels = c("No pro-ruso", "Pro-ruso"))
+  )
+```
+
+Definimos también una función auxiliar para la **moda** (el estadístico de
+tendencia central propio del nivel nominal):
+
+```{r moda}
+moda <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+```
+
+# Nivel nominal
+
+En el nivel **nominal** las categorías solo se distinguen entre sí, sin orden ni
+distancia. Variables de este taller: `russian_tv`, `within_25km` (ambas bases) y
+`pro_russian_vote` (encuesta). Todas son **dicotómicas**.
+
+- **Descriptivos válidos:** frecuencias absolutas y relativas, moda.
+- **No válidos:** media, mediana, desviación (no hay orden ni distancia).
+
+## Descriptivos
+
+```{r nominal-descriptivos}
+# Frecuencias absolutas
+table(precincts$russian_tv_f)
+
+# Frecuencias relativas (proporciones)
+prop.table(table(precincts$russian_tv_f)) %>% round(3)
+
+# Moda
+moda(precincts$russian_tv_f)
+```
+
+Una tabla de frecuencias ordenada, útil para presentar:
+
+```{r nominal-tabla}
+precincts %>%
+  count(russian_tv_f, name = "frecuencia") %>%
+  mutate(proporcion = round(frecuencia / sum(frecuencia), 3)) %>%
+  kable()
+```
+
+## Visualización
+
+El gráfico natural para una variable nominal es el **diagrama de barras**: la
+altura representa un conteo o una proporción, y las barras están *separadas*
+porque las categorías son discretas.
+
+```{r nominal-barras}
+ggplot(precincts, aes(x = russian_tv_f)) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Disponibilidad de TV rusa en los precintos",
+       x = NULL, y = "Número de precintos")
+```
+
+Con dos categorías cruzadas podemos comparar composición:
+
+```{r nominal-barras-cruzadas}
+ggplot(precincts, aes(x = within_25km_f, fill = russian_tv_f)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "TV rusa según cercanía a la frontera",
+       x = NULL, y = "Proporción de precintos", fill = NULL)
+```
+
+# Nivel ordinal
+
+En el nivel **ordinal** las categorías tienen un **orden**, pero las distancias
+entre ellas no son interpretables. Los datos no traen una variable ordinal
+nativa, así que construimos una **discretizando** el porcentaje de voto pro-ruso
+en tres tramos (terciles): `Bajo`, `Medio`, `Alto`. Es un buen momento para
+discutir con el grupo qué se *gana* (interpretabilidad) y qué se *pierde*
+(información) al degradar una variable continua a ordinal.
+
+```{r ordinal-crear}
+precincts <- precincts %>%
+  mutate(pro_russian_cat = cut(
+    pro_russian,
+    breaks = quantile(pro_russian, probs = seq(0, 1, by = 1/3)),
+    labels = c("Bajo", "Medio", "Alto"),
+    include.lowest = TRUE,
+    ordered_result = TRUE
+  ))
+
+levels(precincts$pro_russian_cat)
+```
+
+## Descriptivos
+
+- **Válidos:** frecuencias, **mediana** y cuartiles, moda.
+- **No válido:** la media (no hay distancias iguales entre categorías).
+
+```{r ordinal-descriptivos}
+# Frecuencias por categoría (respetando el orden)
+table(precincts$pro_russian_cat)
+
+# Mediana ordinal: categoría que ocupa la posición central
+niveles <- levels(precincts$pro_russian_cat)
+niveles[round(median(as.integer(precincts$pro_russian_cat)))]
+```
+
+## Visualización
+
+Barras **ordenadas** según la secuencia de las categorías:
+
+```{r ordinal-barras}
+ggplot(precincts, aes(x = pro_russian_cat)) +
+  geom_bar(fill = "darkorange") +
+  labs(title = "Precintos por nivel de apoyo pro-ruso (terciles)",
+       x = "Nivel de apoyo pro-ruso", y = "Número de precintos")
+```
+
+# Nivel de intervalo y de razón
+
+Las variables `pro_russian` y `prior_pro_russian` son **cuantitativas
+continuas**. Como son **porcentajes con cero absoluto** (0% significa ausencia
+real de voto pro-ruso) y los cocientes tienen sentido (40% es el doble de 20%),
+están en el nivel de **razón**. La diferencia con el nivel de intervalo es
+justamente ese cero absoluto: en una escala de intervalo (p. ej. temperatura en
+°C) el cero es convencional y las razones no son interpretables.
+
+## Descriptivos
+
+Aquí sí valen **todos** los estadísticos: media, mediana, desviación estándar,
+rango, cuartiles.
+
+```{r ratio-descriptivos}
+summary(precincts$pro_russian)
+
+precincts %>%
+  summarise(
+    media    = mean(pro_russian),
+    mediana  = median(pro_russian),
+    desv_est = sd(pro_russian),
+    minimo   = min(pro_russian),
+    maximo   = max(pro_russian),
+    RIC      = IQR(pro_russian)
+  ) %>%
+  kable(digits = 2, caption = "Apoyo pro-ruso (% de voto) por precinto")
+```
+
+## Visualización
+
+El **histograma** muestra la forma de la distribución de una variable continua
+(barras *pegadas*, a diferencia del diagrama de barras nominal):
+
+```{r ratio-histograma}
+ggplot(precincts, aes(x = pro_russian)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  labs(title = "Distribución del voto pro-ruso por precinto",
+       x = "% de voto pro-ruso", y = "Número de precintos")
+```
+
+El **diagrama de caja** resume mediana, cuartiles y valores atípicos:
+
+```{r ratio-boxplot}
+ggplot(precincts, aes(y = pro_russian)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Diagrama de caja del voto pro-ruso",
+       y = "% de voto pro-ruso", x = NULL) +
+  theme(axis.text.x = element_blank())
+```
+
+Con dos variables de razón podemos usar un **diagrama de dispersión** para ver su
+relación (voto previo vs. voto actual):
+
+```{r ratio-scatter}
+ggplot(precincts, aes(x = prior_pro_russian, y = pro_russian)) +
+  geom_point(alpha = 0.2, color = "steelblue") +
+  geom_smooth(method = "lm", se = FALSE, color = "darkred") +
+  labs(title = "Voto pro-ruso previo y actual",
+       x = "% previo pro-ruso", y = "% actual pro-ruso")
+```
+
+# El mismo concepto, dos niveles de medición
+
+Este es el punto central del taller. El **apoyo pro-ruso** se operacionaliza de
+dos maneras según la unidad de análisis, y cada operacionalización obliga a un
+tratamiento estadístico distinto.
+
+## A nivel de precinto: variable de razón
+
+A nivel agregado el apoyo es un **porcentaje**; lo resumimos con **medias** por
+grupo y lo visualizamos con **cajas**.
+
+```{r comparacion-precinto}
+precincts %>%
+  group_by(russian_tv_f) %>%
+  summarise(media_pro_russian = mean(pro_russian),
+            desv = sd(pro_russian)) %>%
+  kable(digits = 2)
+
+ggplot(precincts, aes(x = russian_tv_f, y = pro_russian, fill = russian_tv_f)) +
+  geom_boxplot(show.legend = FALSE) +
+  labs(title = "Voto pro-ruso por precinto según TV rusa",
+       x = NULL, y = "% de voto pro-ruso")
+```
+
+## A nivel individual: variable nominal
+
+A nivel individual el apoyo es **binario**. Un detalle instructivo: cuando una
+variable dicotómica se codifica `0/1`, **su media es la proporción** de casos con
+valor 1. Por eso podemos "promediar" `pro_russian_vote` sin violar su naturaleza
+nominal: no estamos midiendo una cantidad, sino estimando una frecuencia
+relativa.
+
+```{r comparacion-individuo}
+survey %>%
+  group_by(russian_tv_f) %>%
+  summarise(prop_pro_russian = mean(pro_russian_vote)) %>%
+  kable(digits = 3)
+
+survey %>%
+  group_by(russian_tv_f) %>%
+  summarise(prop_pro_russian = mean(pro_russian_vote)) %>%
+  ggplot(aes(x = russian_tv_f, y = prop_pro_russian, fill = russian_tv_f)) +
+  geom_col(show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(title = "Proporción de voto pro-ruso por persona según TV rusa",
+       x = NULL, y = "Proporción pro-ruso")
+```
+
+## Nota: la falacia ecológica
+
+Tener las dos unidades permite advertir sobre la **falacia ecológica**: una
+correlación observada a nivel de precinto (entre exposición a TV rusa y % de
+voto) **no autoriza** a inferir la conducta de los individuos. Precisamente por
+eso el estudio original triangula el nivel agregado con el nivel individual, en
+vez de deducir uno del otro.
+
+# Síntesis
+
+| Nivel | Ejemplo en los datos | Descriptivos apropiados | Visualización típica |
+|---|---|---|---|
+| Nominal | `russian_tv`, `pro_russian_vote` | frecuencias, proporciones, moda | barras separadas |
+| Ordinal | `pro_russian_cat` (terciles) | frecuencias, mediana, cuartiles | barras ordenadas |
+| Intervalo | (temperatura °C, año) | + media, desviación | histograma, caja |
+| Razón | `pro_russian`, `prior_pro_russian` | + razones y coeficientes | histograma, caja, dispersión |
+
+La regla práctica: cada nivel *hereda* los estadísticos de los niveles
+anteriores y **añade** los suyos. Elegir un estadístico o un gráfico que el nivel
+de medición no soporta (una media de una variable nominal, por ejemplo) es uno de
+los errores más frecuentes —y más instructivos— para discutir en clase.

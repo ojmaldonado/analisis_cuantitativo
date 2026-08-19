@@ -1,17 +1,19 @@
 # Parcial I
 Análisis cuantitativo I.
+
 Escuela de estudios sociales, políticos e internacionales.
+
 Universidad del Rosario.
 
 
 ## Instrucciones
-Construya una base de datos ordenada (cada columna=una variable; cada fila=una observación) con base en la calculadora del gastos de DANE:
+1. Construya una base de datos ordenada (cada columna=una variable; cada fila=una observación) con base en la calculadora del gastos de DANE:
 
 (https://sitios.dane.gov.co/ipc/simuladorIPC/#!/)
 
-Pregunte a vecinos, familiares, amigos, particulares, hasta que complete al menos 20 respuestas por grupo.
+2. Pregunte a vecinos, familiares, amigos, particulares, hasta que complete al menos 20 respuestas por grupo.
 
-Una vez construida la base de datos (tabla), organice el porcentaje del gasto se va en cada una de las categorías contempladas por Dubois para su análisis de costo de vida y explique cómo se cumple la Ley de Engel para los datos recolectados.
+3. Una vez construida la base de datos (tabla), organice el porcentaje del gasto se va en cada una de las categorías contempladas por Dubois para su análisis de costo de vida y explique cómo se cumple la Ley de Engel para los datos recolectados.
 
 Información aquí:
 (https://github.com/ojmaldonado/analisis_cuantitativo/blob/main/Duboisian/Dubois.md)

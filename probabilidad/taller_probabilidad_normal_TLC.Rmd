@@ -1,0 +1,283 @@
+---
+title: 'Taller: Probabilidad, Distribución Normal y Teorema del Límite Central'
+author: "Análisis Cuantitativo"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+  pdf_document:
+    toc: true
+subtitle: Curso de Análisis Cuantitativo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.width = 7,
+  fig.height = 4.5
+)
+```
+
+> **Cómo usar este documento.** Ábralo en RStudio. Puede ejecutar el código bloque
+> por bloque (botón ▶ en la esquina de cada *chunk*, o Ctrl/Cmd+Enter línea a
+> línea) para ver los resultados en vivo, o presionar **Knit** para generar un
+> documento HTML con todo el texto y las gráficas ya renderizadas.
+>
+> Duración estimada: 60–75 minutos · Nivel introductorio (no requiere experiencia previa en R).
+
+# Preparación
+
+Instalamos `ggplot2` solo si hace falta y lo cargamos. Fijamos además una
+"semilla" para que la aleatoriedad sea reproducible: así todos en el salón
+obtienen exactamente los mismos números aleatorios.
+
+```{r preparacion}
+if (!requireNamespace("ggplot2", quietly = TRUE)) install.packages("ggplot2")
+library(ggplot2)
+
+set.seed(123)
+```
+
+# Probabilidad: de la moneda a la regularidad
+
+La idea central es que la probabilidad de un evento es la frecuencia con la que
+ocurre *a la larga*. Con pocas repeticiones hay mucho ruido; con muchas, aparece
+una regularidad estable. A eso se le llama la **Ley de los Grandes Números**.
+
+## Simular el lanzamiento de una moneda
+
+Lancemos una moneda 10 veces (cara/sello):
+
+```{r moneda-10}
+sample(c("cara", "sello"), size = 10, replace = TRUE)
+```
+
+Ahora 1000 veces, y contamos los resultados:
+
+```{r moneda-1000}
+lanzamientos <- sample(c("cara", "sello"), size = 1000, replace = TRUE)
+table(lanzamientos)              # frecuencias absolutas
+prop.table(table(lanzamientos))  # frecuencias relativas (proporciones)
+```
+
+**Para discutir:** ¿la proporción de "cara" se parece al 0.5 teórico?
+
+## La Ley de los Grandes Números, en un gráfico
+
+Codificamos cara = 1 y sello = 0, y vamos calculando la proporción *acumulada*
+de caras conforme aumenta el número de lanzamientos.
+
+```{r lgn-grafico}
+n         <- 2000
+lanz      <- sample(c(0, 1), size = n, replace = TRUE)   # 1 = cara
+prop_acum <- cumsum(lanz) / seq_len(n)                    # proporción acumulada
+
+df_lgn <- data.frame(lanzamiento = seq_len(n), proporcion = prop_acum)
+
+ggplot(df_lgn, aes(x = lanzamiento, y = proporcion)) +
+  geom_line(color = "steelblue") +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "red") +
+  coord_cartesian(ylim = c(0, 1)) +
+  labs(
+    title = "Ley de los Grandes Números",
+    subtitle = "La proporción de caras se estabiliza en 0.5 al aumentar los lanzamientos",
+    x = "Número de lanzamientos",
+    y = "Proporción acumulada de caras"
+  ) +
+  theme_minimal()
+```
+
+**Lección:** la probabilidad no garantiza nada en el corto plazo (la moneda no
+"debe" salir cara porque salieron muchos sellos), pero sí produce una
+regularidad estable en el largo plazo.
+
+# La distribución normal
+
+La distribución normal (o "campana de Gauss") describe muchas variables
+continuas que se concentran alrededor de un promedio y se vuelven raras en los
+extremos. Queda definida por dos parámetros: la **media** ($\mu$), que indica
+dónde está el centro, y la **desviación estándar** ($\sigma$), que indica qué
+tan ancha o dispersa es la campana.
+
+## Dibujar la campana
+
+```{r normal-curva}
+x <- seq(-4, 4, length.out = 400)
+y <- dnorm(x, mean = 0, sd = 1)   # dnorm = "altura" de la curva normal en cada x
+
+df_normal <- data.frame(x = x, densidad = y)
+
+ggplot(df_normal, aes(x = x, y = densidad)) +
+  geom_line(color = "darkred", linewidth = 1) +
+  labs(
+    title = "Distribución Normal estándar (media = 0, desviación = 1)",
+    x = "Valor (z)", y = "Densidad"
+  ) +
+  theme_minimal()
+```
+
+## Las cuatro funciones clave de la normal en R
+
+En R, casi toda distribución tiene cuatro funciones. Para la normal:
+
+- `dnorm()` → densidad (altura de la curva)
+- `pnorm()` → probabilidad acumulada (área a la izquierda de un valor)
+- `qnorm()` → el cuantil (el valor que deja cierta probabilidad a la izquierda)
+- `rnorm()` → genera datos aleatorios que siguen la normal
+
+```{r normal-funciones}
+# ¿Qué proporción de casos está por debajo del promedio? (debería ser 0.5)
+pnorm(0, mean = 0, sd = 1)
+
+# ¿Por debajo de qué valor está el 95% de los casos?
+qnorm(0.95, mean = 0, sd = 1)
+
+# Generamos 5 "personas" con estatura ~ Normal(media = 170 cm, sd = 8 cm):
+rnorm(5, mean = 170, sd = 8)
+```
+
+## La regla 68 – 95 – 99.7
+
+En una normal, alrededor del 68% de los casos cae a 1 desviación de la media, el
+95% a 2 desviaciones y el 99.7% a 3. Comprobémoslo con `pnorm()`:
+
+```{r regla-68-95-997}
+pnorm(1) - pnorm(-1)    # ~ 0.68  -> dentro de +/- 1 sd
+pnorm(2) - pnorm(-2)    # ~ 0.95  -> dentro de +/- 2 sd
+pnorm(3) - pnorm(-3)    # ~ 0.997 -> dentro de +/- 3 sd
+```
+
+Esta regla es la base para interpretar puntajes, valores atípicos e intervalos
+de confianza.
+
+# El Teorema del Límite Central (TLC)
+
+**Enunciado intuitivo.** Si tomamos muchas *muestras* de una población (no
+importa su forma) y calculamos el *promedio* de cada muestra, la distribución de
+esos promedios se aproxima a una **normal** a medida que aumenta el tamaño de
+muestra ($n$). Además, el promedio de esos promedios se acerca a la media de la
+población, y su dispersión se reduce en un factor de $\sqrt{n}$ (el **error
+estándar**).
+
+Este es el resultado que justifica gran parte de la inferencia estadística en
+ciencias sociales: es la razón por la que podemos confiar en promedios de
+encuestas.
+
+## Una población claramente NO normal
+
+Simulamos una población muy asimétrica, parecida a la distribución del ingreso:
+muchas personas con ingresos bajos y unas pocas con ingresos muy altos.
+
+```{r poblacion-sesgada}
+set.seed(2024)
+poblacion <- rexp(100000, rate = 1)   # exponencial: cola larga hacia la derecha
+
+ggplot(data.frame(x = poblacion), aes(x = x)) +
+  geom_histogram(bins = 60, fill = "grey40", color = "white") +
+  labs(
+    title = "Población de origen: fuertemente asimétrica (NO normal)",
+    subtitle = "Imagine la distribución del ingreso: muchos abajo, pocos muy arriba",
+    x = "Valor en la población", y = "Frecuencia"
+  ) +
+  theme_minimal()
+```
+
+## Tomar muchas muestras y guardar sus promedios
+
+Esta función toma `reps` muestras de tamaño `n` y devuelve el promedio de cada
+una. La aplicamos con tres tamaños de muestra crecientes.
+
+```{r muestreo}
+medias_muestrales <- function(poblacion, n, reps = 1000) {
+  replicate(reps, mean(sample(poblacion, size = n, replace = TRUE)))
+}
+
+medias_n5   <- medias_muestrales(poblacion, n = 5)
+medias_n30  <- medias_muestrales(poblacion, n = 30)
+medias_n100 <- medias_muestrales(poblacion, n = 100)
+```
+
+## Ver cómo los promedios se "vuelven normales"
+
+Juntamos los tres experimentos en un solo `data.frame` y los graficamos en
+paneles separados.
+
+```{r tlc-grafico, fig.width=9, fig.height=4}
+df_tlc <- rbind(
+  data.frame(media = medias_n5,   n = "n = 5"),
+  data.frame(media = medias_n30,  n = "n = 30"),
+  data.frame(media = medias_n100, n = "n = 100")
+)
+# Ordenamos los niveles para que los paneles salgan de menor a mayor n:
+df_tlc$n <- factor(df_tlc$n, levels = c("n = 5", "n = 30", "n = 100"))
+
+ggplot(df_tlc, aes(x = media)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 30,
+                 fill = "steelblue", color = "white") +
+  geom_density(color = "red", linewidth = 1) +   # forma empírica de los promedios
+  facet_wrap(~ n, scales = "free") +
+  labs(
+    title = "Teorema del Límite Central en acción",
+    subtitle = "La distribución de los PROMEDIOS muestrales se acerca a una campana al crecer n",
+    x = "Promedio de la muestra", y = "Densidad"
+  ) +
+  theme_minimal()
+```
+
+Aunque la población era muy asimétrica, ¡los *promedios* forman una campana! Y
+con $n = 100$ la campana es más angosta: los promedios varían menos.
+
+## Comprobación cuantitativa
+
+El TLC no solo habla de la *forma*, también predice el *centro* y la
+*dispersión* de la distribución de los promedios.
+
+```{r tlc-comprobacion}
+media_poblacion <- mean(poblacion)   # media verdadera (mu)
+sd_poblacion    <- sd(poblacion)     # desviación de la población (sigma)
+
+# El centro de los promedios debe coincidir con la media poblacional:
+media_poblacion
+mean(medias_n30)
+
+# La dispersión de los promedios (error estándar) debe ser sigma / sqrt(n):
+sd_poblacion / sqrt(30)   # error estándar TEÓRICO
+sd(medias_n30)            # error estándar EMPÍRICO (de nuestra simulación)
+```
+
+Los dos valores del error estándar deberían ser muy parecidos: eso es
+exactamente lo que promete el TLC.
+
+# Ejercicios propuestos
+
+Trabaje en grupos y modifique el código anterior.
+
+1. **Moneda sesgada.** Simule una moneda cargada donde "cara" tenga probabilidad
+   0.7. *Pista:* `sample(c(0,1), n, replace = TRUE, prob = c(0.3, 0.7))`.
+   ¿Hacia qué valor se estabiliza la proporción?
+2. **Otra normal.** Dibuje la estatura de una población con media = 165 y
+   desviación = 6. ¿Qué proporción mide más de 180 cm?
+   *Pista:* `1 - pnorm(180, mean = 165, sd = 6)`.
+3. **TLC con otra población.** Reemplace la población exponencial por una
+   uniforme: `poblacion <- runif(100000, min = 0, max = 1)`. Vuelva a correr el
+   muestreo. ¿También se vuelven normales los promedios?
+4. **El poder de $n$.** Repita el experimento del TLC con $n = 2$ y con
+   $n = 500$. ¿Qué le pasa al *ancho* de la campana de promedios? Conéctelo con
+   la fórmula del error estándar ($\sigma / \sqrt{n}$).
+
+# Síntesis conceptual
+
+- **Probabilidad:** la frecuencia estable de un evento a largo plazo (Ley de los
+  Grandes Números).
+- **Distribución normal:** modelo en forma de campana definido por media y
+  desviación estándar; regla 68-95-99.7.
+- **Teorema del Límite Central:** los promedios de muestras tienden a una normal
+  aunque la población no lo sea. Es el puente entre la probabilidad y la
+  inferencia estadística que usamos con datos de encuestas.

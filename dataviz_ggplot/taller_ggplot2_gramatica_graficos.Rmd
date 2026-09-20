@@ -1,0 +1,418 @@
+---
+title: "Taller: `ggplot2` y la gramática de los gráficos"
+subtitle: "Aprender a visualizar paso a paso con datos de violencia intrafamiliar (SIVIM, Bogotá)"
+author: "Análisis Cuantitativo — Universidad del Rosario"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width  = 8,
+  fig.height = 5,
+  fig.align  = "center",
+  dpi = 110
+)
+```
+
+# Objetivos y cómo usar este taller
+
+Al terminar este taller vas a poder:
+
+- Explicar qué es la **gramática de los gráficos** y por qué `ggplot2` está construido sobre ella.
+- Leer y escribir una llamada a `ggplot2` identificando cada una de sus **capas**.
+- Construir tus propias visualizaciones **añadiendo una capa a la vez** con el operador `+`.
+
+El énfasis está en **entender cómo funciona `ggplot2`**, no en el análisis sustantivo de la violencia intrafamiliar (ese es tema de otro taller). Los datos aquí son solo el material con el que practicamos.
+
+**Cómo trabajar:** abre este archivo en RStudio y ejecuta los bloques de código (los *chunks* grises) uno por uno con el botón ▶ o con `Ctrl+Shift+Enter`. Observa cómo cambia cada gráfico cuando agregamos una línea. Al final hay ejercicios para que lo hagas por tu cuenta.
+
+---
+
+# ¿Qué es la gramática de los gráficos?
+
+La idea, formulada por Leland Wilkinson (*The Grammar of Graphics*, 1999) y adaptada a R por Hadley Wickham (*A Layered Grammar of Graphics*, 2010), es sencilla y poderosa:
+
+> Un gráfico es un **mapeo** de variables de los datos a **propiedades visuales** (posición, color, tamaño…) de **objetos geométricos** (barras, puntos, líneas…), dibujados dentro de un sistema de coordenadas.
+
+En vez de tener una función distinta para cada "tipo" de gráfico (una para barras, otra para líneas, otra para dispersión…), `ggplot2` te da un conjunto de **componentes gramaticales** que combinas como si armaras frases. Cambiar el gráfico es cambiar un componente, no empezar de cero.
+
+Estos son los componentes y su función en `ggplot2`:
+
+| Componente | Pregunta que responde | En `ggplot2` |
+|---|---|---|
+| **Datos** (*data*) | ¿Qué información grafico? | `ggplot(data = ...)` |
+| **Estética** (*aes*) | ¿Qué variable va a qué propiedad visual? | `aes(x =, y =, color =, fill =, ...)` |
+| **Geometría** (*geom*) | ¿Con qué forma la represento? | `geom_bar()`, `geom_point()`, `geom_line()`… |
+| **Estadística** (*stat*) | ¿Qué cálculo hace antes de dibujar? | `stat_count()`, `stat_smooth()` (muchas veces implícita) |
+| **Escalas** (*scale*) | ¿Cómo traduzco valores a píxeles/colores? | `scale_x_*()`, `scale_fill_*()` |
+| **Coordenadas** (*coord*) | ¿En qué sistema de coordenadas? | `coord_flip()`, `coord_polar()` |
+| **Facetas** (*facet*) | ¿Un panel o varios paneles pequeños? | `facet_wrap()`, `facet_grid()` |
+| **Tema** (*theme*) | ¿Qué aspecto tienen los elementos no-datos? | `theme_minimal()`, `theme()` |
+
+La clave que hay que interiorizar: **las capas se suman con `+`**. Empiezas con los datos y las estéticas, y vas agregando geometrías, escalas, coordenadas, facetas y tema.
+
+---
+
+# Preparación: paquetes y datos
+
+Esta sección **no es el foco** del taller. Solo dejamos los datos listos. Léela rápido, ejecútala y sigue a la sección 4, que es donde empieza `ggplot2`.
+
+## Paquetes
+
+`ggplot2` viene dentro del **tidyverse** (junto con `dplyr`, `tidyr`, `readr` y `forcats`, que usaremos para preparar los datos). También cargamos `scales` para formatear los ejes (miles, porcentajes).
+
+```{r paquetes}
+paquetes <- c("tidyverse", "scales")
+faltan <- paquetes[!paquetes %in% rownames(installed.packages())]
+if (length(faltan) > 0) install.packages(faltan)
+
+library(tidyverse)   # incluye ggplot2, dplyr, tidyr, readr, forcats...
+library(scales)      # label_comma(), label_percent()
+```
+
+## Lectura de los datos
+
+Usamos el mismo archivo del taller de violencia intrafamiliar: `osb_saludmental-vintrafamiliar.csv` (subsistema SIVIM, Bogotá D.C., serie 2013–2026). Es un CSV **separado por punto y coma** (`;`) y codificado en **UTF-8**.
+
+```{r leer-datos}
+# Ajusta esta ruta si el archivo está en otra carpeta:
+ruta_datos <- "/Users/oscar/Documents/AQ26/osb_saludmental-vintrafamiliar.csv"
+
+if (!file.exists(ruta_datos)) {
+  stop("No encuentro el archivo. Copia 'osb_saludmental-vintrafamiliar.csv' ",
+       "a la carpeta de trabajo o corrige 'ruta_datos'.")
+}
+
+casos <- read_delim(
+  ruta_datos,
+  delim  = ";",
+  locale = locale(encoding = "UTF-8"),
+  show_col_types = FALSE
+)
+
+glimpse(casos)
+```
+
+## Un dato clave sobre la estructura
+
+En esta base, **el tipo de violencia no es una sola columna**. Cada tipo se registra en su propia columna `lugocurrencia*`, que guarda el *lugar* de ocurrencia. Un caso "presenta" ese tipo de violencia cuando el valor **no es `"Sin dato"`**. Como un mismo caso puede acumular varios tipos a la vez, para graficar por tipo conviene pasar la tabla a **formato largo**: una fila por cada combinación caso × tipo presente.
+
+```{r preparar-largo}
+# Mapa: nombre de columna -> etiqueta legible del tipo de violencia
+tipos_map <- c(
+  lugocurrenciaemocional   = "Emocional",
+  lugocurrenciafisica      = "Física",
+  lugocurrenciasexual      = "Sexual",
+  lugocurrenciaeconomica   = "Económica",
+  lugocurrencianegligencia = "Negligencia",
+  lugocurrenciaabandono    = "Abandono"
+)
+
+vio_largo <- casos %>%
+  pivot_longer(
+    cols      = all_of(names(tipos_map)),
+    names_to  = "columna",
+    values_to = "lugar_ocurrencia"
+  ) %>%
+  filter(lugar_ocurrencia != "Sin dato") %>%          # el caso SÍ tiene ese tipo
+  mutate(tipo = factor(unname(tipos_map[columna]),
+                       levels = unname(tipos_map)))
+
+# 'casos'    -> una fila por caso (útil para conteos demográficos)
+# 'vio_largo'-> una fila por caso × tipo (útil para todo lo que sea "por tipo")
+vio_largo %>% select(ano, sexo, grupoedad, NOMBRE_LOCALIDAD, tipo) %>% head()
+```
+
+> A partir de aquí **ya no hacemos más preparación de datos**: todo el taller usa `casos` o `vio_largo`.
+
+---
+
+# Tu primer gráfico, capa por capa
+
+Aquí está el corazón del taller. Vamos a construir **un mismo gráfico** sumando componentes de la gramática, uno por uno, para ver qué aporta cada uno.
+
+## Capa 1 — Solo los datos
+
+`ggplot()` con solo los datos crea un **lienzo vacío**: sabe qué tabla usar, pero todavía no sabe qué dibujar ni dónde.
+
+```{r capa1}
+ggplot(data = vio_largo)
+```
+
+## Capa 2 — Mapeo estético (`aes`)
+
+Con `aes()` decimos **qué variable va a qué propiedad visual**. Aquí mandamos `tipo` al eje X. Aparecen los ejes… pero aún no hay marcas: falta la geometría.
+
+```{r capa2}
+ggplot(data = vio_largo, aes(x = tipo))
+```
+
+## Capa 3 — Geometría (`geom`)
+
+`geom_bar()` dibuja **barras**. Fíjate que no le dimos un eje Y: `geom_bar()` trae una **estadística implícita** (`stat_count`) que *cuenta* cuántas filas hay en cada categoría de X. Esa es la capa "estadística" trabajando por debajo.
+
+```{r capa3}
+ggplot(data = vio_largo, aes(x = tipo)) +
+  geom_bar()
+```
+
+## Capa 4 — Otra estética: `fill`
+
+Agregamos una segunda variable al mapeo: `fill = sexo` colorea las barras según el sexo. Cambiar el gráfico fue **agregar un argumento a `aes()`**, no reescribirlo.
+
+```{r capa4}
+ggplot(data = vio_largo, aes(x = tipo, fill = sexo)) +
+  geom_bar()
+```
+
+## Capa 5 — Ajustar la geometría: `position`
+
+Por defecto las barras quedan **apiladas** (`stack`). Con `position = "dodge"` las ponemos **lado a lado** para comparar mejor. Este argumento vive en la geometría, no en `aes()`.
+
+```{r capa5}
+ggplot(data = vio_largo, aes(x = tipo, fill = sexo)) +
+  geom_bar(position = "dodge")
+```
+
+## Capa 6 — Escalas, etiquetas y tema
+
+Últimas capas: formateamos el eje Y con separador de miles (`scale_y_continuous`), ponemos títulos legibles (`labs`) y limpiamos el aspecto (`theme_minimal`). El gráfico ya está listo para presentar.
+
+```{r capa6}
+ggplot(data = vio_largo, aes(x = tipo, fill = sexo)) +
+  geom_bar(position = "dodge") +
+  scale_y_continuous(labels = label_comma()) +
+  labs(
+    title    = "Casos de violencia intrafamiliar por tipo y sexo",
+    subtitle = "SIVIM · Bogotá D.C. · 2013–2026",
+    x = "Tipo de violencia",
+    y = "Número de casos",
+    fill = "Sexo"
+  ) +
+  theme_minimal(base_size = 12)
+```
+
+**La moraleja:** un gráfico de `ggplot2` se lee (y se escribe) como una suma de capas gramaticales. Con eso ya puedes entender casi cualquier código de `ggplot2` que encuentres.
+
+---
+
+# Galería de geometrías
+
+Ahora recorremos las geometrías más útiles. En cada una señalo **qué componente de la gramática ilustra**, para que veas que siempre es la misma lógica.
+
+## `geom_col` vs `geom_bar`: barras a partir de datos ya contados
+
+`geom_bar()` **cuenta** por ti. Si ya tienes una tabla con la columna a graficar (`n`), usa `geom_col()`, que dibuja **la altura tal cual** (`stat = "identity"`). De paso ordenamos las barras con `fct_reorder()` y las volteamos con `coord_flip()`.
+
+```{r geom-col}
+conteo_tipo <- vio_largo %>% count(tipo, sort = TRUE)
+
+ggplot(conteo_tipo, aes(x = fct_reorder(tipo, n), y = n)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  scale_y_continuous(labels = label_comma()) +
+  labs(title = "Frecuencia por tipo de violencia",
+       x = NULL, y = "Número de casos") +
+  theme_minimal(base_size = 12)
+```
+
+> **Qué ilustra:** *geom* (`geom_col`), *stat* (identidad vs conteo), *coord* (`coord_flip`) y el orden de un factor con `forcats`.
+
+## Muchas categorías: grupo de edad
+
+Cuando el eje tiene muchas categorías (grupos de edad), voltear las barras las hace legibles. `fct_infreq()` las ordena por frecuencia sin que tengamos que conocer de antemano los nombres de los niveles.
+
+```{r grupoedad}
+ggplot(vio_largo, aes(x = fct_infreq(grupoedad))) +
+  geom_bar(fill = "#3182bd") +
+  coord_flip() +
+  scale_y_continuous(labels = label_comma()) +
+  labs(title = "Casos por grupo de edad",
+       x = NULL, y = "Número de casos") +
+  theme_minimal(base_size = 12)
+```
+
+> **Qué ilustra:** cómo `forcats` (`fct_infreq`) y `coord_flip` resuelven el problema clásico de "etiquetas amontonadas".
+
+## Mapa de calor: `geom_tile` (dos variables categóricas + una continua)
+
+Para cruzar **tipo × localidad**, cada celda es un rectángulo (`geom_tile`) cuyo color codifica el conteo. Aquí el `fill` está mapeado a una variable **continua** (`n`), así que la escala de color es continua (`scale_fill_viridis_c`).
+
+```{r geom-tile}
+tipo_localidad <- vio_largo %>%
+  filter(!is.na(NOMBRE_LOCALIDAD), NOMBRE_LOCALIDAD != "Sin dato") %>%
+  count(NOMBRE_LOCALIDAD, tipo)
+
+ggplot(tipo_localidad, aes(x = tipo, y = NOMBRE_LOCALIDAD, fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis_c(labels = label_comma(), option = "C") +
+  labs(title = "Casos por tipo de violencia y localidad",
+       x = "Tipo", y = "Localidad", fill = "Casos") +
+  theme_minimal(base_size = 11)
+```
+
+> **Qué ilustra:** una *geom* distinta (`geom_tile`) y una **escala de relleno continua**. Compara con el `fill = sexo` anterior, que era categórico.
+
+## Composición: `position = "fill"` (proporciones)
+
+Con `position = "fill"` las barras apiladas se normalizan a **1**, mostrando la *composición* relativa. Formateamos el eje Y como porcentaje.
+
+```{r position-fill}
+ggplot(vio_largo, aes(x = sexo, fill = tipo)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = label_percent()) +
+  labs(title = "Composición de tipos de violencia según sexo",
+       x = "Sexo", y = "Proporción", fill = "Tipo") +
+  theme_minimal(base_size = 12)
+```
+
+> **Qué ilustra:** el mismo `geom_bar` cambia de significado según `position` (`stack` → `dodge` → `fill`) y según la **escala** del eje.
+
+## Series de tiempo: `geom_line` + `geom_point`
+
+Para la tendencia anual mapeamos `ano` a X, el conteo a Y y `tipo` a `color`. Sumamos **dos geometrías** sobre el mismo mapeo: la línea y los puntos. Que se puedan superponer capas de este modo es, de nuevo, la gramática en acción.
+
+```{r geom-line}
+tendencia <- vio_largo %>% count(ano, tipo)
+
+ggplot(tendencia, aes(x = ano, y = n, color = tipo)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.6) +
+  scale_y_continuous(labels = label_comma()) +
+  labs(title = "Tendencia anual por tipo de violencia",
+       x = "Año", y = "Número de casos", color = "Tipo",
+       caption = "Nota: el último año puede estar incompleto.") +
+  theme_minimal(base_size = 12)
+```
+
+> **Qué ilustra:** `color` como estética que **separa series**, y la suma de varias geometrías (`geom_line` + `geom_point`).
+
+## Facetas: `facet_wrap` (paneles pequeños)
+
+Las facetas repiten el mismo gráfico para cada valor de una variable. Aquí, un panel por sexo. Es la forma "gramatical" de comparar subgrupos sin saturar un solo panel.
+
+```{r facetas}
+ggplot(vio_largo, aes(x = fct_infreq(tipo))) +
+  geom_bar(fill = "#756bb1") +
+  facet_wrap(~ sexo) +
+  coord_flip() +
+  scale_y_continuous(labels = label_comma()) +
+  labs(title = "Tipos de violencia, un panel por sexo",
+       x = NULL, y = "Número de casos") +
+  theme_minimal(base_size = 11)
+```
+
+> **Qué ilustra:** el componente *facet*. Con `facet_grid(fila ~ columna)` puedes cruzar **dos** variables en una cuadrícula de paneles.
+
+---
+
+# Escalas, temas y etiquetas: pulir el gráfico
+
+Estas capas no cambian *qué* datos ves, sino *cómo* los ves. Aquí varios recursos frecuentes, todos aplicados al mismo gráfico base para que compares.
+
+## Paletas de color (escalas)
+
+```{r escalas-color}
+base <- ggplot(vio_largo, aes(x = fct_infreq(tipo), fill = tipo)) +
+  geom_bar() +
+  coord_flip() +
+  labs(x = NULL, y = "Casos") +
+  guides(fill = "none")   # ocultamos la leyenda: el eje ya dice el tipo
+
+base + scale_fill_brewer(palette = "Set2") + ggtitle("Paleta ColorBrewer: Set2")
+base + scale_fill_viridis_d()               + ggtitle("Paleta viridis (discreta)")
+```
+
+## Temas
+
+```{r temas}
+base + theme_minimal() + ggtitle("theme_minimal()")
+base + theme_classic() + ggtitle("theme_classic()")
+base + theme_bw()      + ggtitle("theme_bw()")
+```
+
+## Ajustes finos con `theme()`
+
+`theme()` controla elementos no relacionados con los datos: posición de la leyenda, ángulo de las etiquetas, tamaño de fuente, etc.
+
+```{r theme-fino}
+ggplot(vio_largo, aes(x = tipo, fill = sexo)) +
+  geom_bar(position = "dodge") +
+  scale_y_continuous(labels = label_comma()) +
+  labs(title = "Ejemplo con theme() personalizado",
+       x = NULL, y = "Casos", fill = "Sexo") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "top",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 20, hjust = 1)
+  )
+```
+
+## Guardar un gráfico: `ggsave()`
+
+`ggsave()` exporta el **último** gráfico dibujado (o el que le pases en `plot =`) a PNG, PDF, SVG, etc., con la resolución que definas.
+
+```{r ggsave, eval=FALSE}
+g <- ggplot(conteo_tipo, aes(x = fct_reorder(tipo, n), y = n)) +
+  geom_col(fill = "steelblue") + coord_flip() + theme_minimal()
+
+ggsave("grafico_tipos.png", plot = g, width = 8, height = 5, dpi = 300)
+```
+
+---
+
+# Anatomía de una llamada a `ggplot2` (para tener a mano)
+
+Cualquier gráfico de `ggplot2` encaja en esta plantilla. No siempre usarás todas las capas, pero cuando leas código ajeno, ubícalas:
+
+```r
+ggplot(data = <DATOS>) +          # 1. Datos
+  aes(<MAPEOS ESTÉTICOS>) +       # 2. Estética: x, y, color, fill, size, shape...
+  <GEOM_*>() +                    # 3. Geometría: geom_bar, geom_point, geom_line...
+  <SCALE_*>() +                   # 4. Escalas: scale_x_*, scale_fill_*...
+  <FACET_*>() +                   # 5. Facetas: facet_wrap, facet_grid
+  <COORD_*>() +                   # 6. Coordenadas: coord_flip, coord_polar
+  labs() +                        # 7. Títulos y etiquetas
+  <THEME_*>()                     # 8. Tema: theme_minimal, theme()...
+```
+
+Tres reglas prácticas para no perderse:
+
+1. Si una propiedad visual **depende de una variable**, va **dentro de `aes()`**. Si es un valor fijo, va **fuera** (p. ej. `geom_bar(fill = "steelblue")` pinta todo de azul; `aes(fill = sexo)` pinta según el sexo).
+2. `geom_bar()` **cuenta**; `geom_col()` usa el valor tal cual. Recuérdalo cuando tus barras "no den la altura esperada".
+3. Cada `+` agrega una capa. Puedes construir el gráfico incrementalmente y guardar el objeto en una variable para reutilizarlo.
+
+---
+
+# Ejercicios
+
+Con lo aprendido, resuelve en tu propio *chunk* de código:
+
+1. **Barras por relación con el agresor.** Grafica la frecuencia de casos según `relacion_agresor`. Como hay muchas categorías, quédate con las 12 más frecuentes (pista: `fct_lump_n(relacion_agresor, 11)`) y usa `coord_flip()`.
+2. **Dodge vs fill.** Toma el gráfico de tipo × sexo y cámbialo de `position = "dodge"` a `position = "fill"`. ¿Qué pregunta responde mejor cada versión?
+3. **Facetas por localidad.** Reproduce el gráfico de tipos de violencia pero con `facet_wrap(~ NOMBRE_LOCALIDAD)`. ¿Qué ventaja y qué desventaja tiene frente al mapa de calor?
+4. **Escala de color.** Al gráfico de tendencia anual, cámbiale la paleta con `scale_color_brewer(palette = "Dark2")` y mueve la leyenda abajo con `theme(legend.position = "bottom")`.
+5. **Guardar.** Exporta uno de tus gráficos a PNG de 300 dpi con `ggsave()`.
+6. **(Reto)** Construye un mapa de calor `grupoedad × tipo` con `geom_tile()` y una escala continua de color. ¿Qué combinación edad–tipo concentra más casos?
+
+---
+
+# Para seguir aprendiendo
+
+- Wickham, H. (2010). *A Layered Grammar of Graphics.* Journal of Computational and Graphical Statistics, 19(1). — el artículo fundacional detrás de `ggplot2`.
+- Wilkinson, L. (1999). *The Grammar of Graphics.* Springer. — la fuente original de la idea.
+- Wickham, H., Çetinkaya-Rundel, M. & Grolemund, G. *R for Data Science* (2ª ed.), capítulos de visualización — <https://r4ds.hadley.nz/>.
+- *ggplot2: Elegant Graphics for Data Analysis* — <https://ggplot2-book.org/>.
+- Hoja de referencia de `ggplot2` (RStudio/Posit) — busca "ggplot2 cheatsheet".

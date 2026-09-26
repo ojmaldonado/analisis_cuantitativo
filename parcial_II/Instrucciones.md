@@ -11,7 +11,7 @@
 | Extensión | 2.000 a 3.000 palabras, sin contar tablas, anexos ni referencias |
 | Formato | PDF, letra 12, interlineado 1,5, normas APA 7 |
 
-## Propósito
+## Objetivo
 
 En este parcial usted diseñará un proyecto de investigación cuantitativo que pueda ejecutarse en cuatro semanas con datos secundarios disponibles hoy. El proyecto debe estar inspirado en el feminismo de datos (D'Ignazio y Klein, 2020). Eso significa que no basta con desagregar por sexo: los datos deben servir para examinar cómo se distribuye el poder, y hay que interrogar cómo fueron producidas las cifras que se usan. No se evalúa la ejecución del análisis, sino la calidad, coherencia y viabilidad del diseño.
 
@@ -149,4 +149,4 @@ El proyecto no debe requerir recolección de datos primarios. Los datos deben se
 
 - D'Ignazio, C. y Klein, L. F. (2020). *Data Feminism*. MIT Press. Acceso abierto en https://data-feminism.mitpress.mit.edu
 - Criado Perez, C. (2019). *Invisible Women: Exposing Data Bias in a World Designed for Men*. Chatto & Windus.
-- [Agregar lecturas del curso, por ejemplo el material sobre Du Bois trabajado en clase.]
+

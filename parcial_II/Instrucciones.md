@@ -1,6 +1,6 @@
 # Parcial II  Análisis Cuantitativo
 
-**Universidad del Rosario · Escuela de Ciencias Humanas · Programa de Sociología**
+**Universidad del Rosario · Programa de Sociología**
 
 **Proyecto de investigación: contar desde otro lugar. Un diseño cuantitativo inspirado en el feminismo de datos**
 

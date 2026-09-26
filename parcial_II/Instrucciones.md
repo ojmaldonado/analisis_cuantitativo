@@ -1,4 +1,4 @@
-# Parcial II — Análisis Cuantitativo
+# Parcial II  Análisis Cuantitativo
 
 **Universidad del Rosario · Escuela de Ciencias Humanas · Programa de Sociología**
 

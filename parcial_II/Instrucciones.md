@@ -47,7 +47,8 @@ Añada después una breve biografía de los datos, de media página a una págin
 
 ### 4. Variables a analizar
 
-Presente una tabla de operacionalización con, como mínimo, una variable dependiente, dos independientes y una de control o estratificación. La tabla debe tener estas columnas:
+Presente una tabla de operacionalización con, como mínimo, una variable dependiente y dos independientes. [Ver explicación] (https://repositorio-uapa.cuaed.unam.mx/repositorio/moodle/pluginfile.php/3217/mod_resource/content/1/UAPA-Las-Variables-y-su-Clasificacion/index.html) 
+La tabla debe tener estas columnas:
 
 | Concepto | Nombre en la base | Pregunta del cuestionario | Nivel de medición | Categorías o rango | Rol en el análisis | Transformación prevista |
 |---|---|---|---|---|---|---|

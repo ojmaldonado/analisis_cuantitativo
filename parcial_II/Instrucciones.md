@@ -7,7 +7,7 @@
 | | |
 |---|---|
 | Modalidad | [Individual / parejas / grupos de 3] |
-| Fecha de entrega | [02/09/2026], [23:59], vía [e-aulas] |
+| Fecha de entrega | [02/10/2026], [23:59], vía [e-aulas] |
 | Extensión | 2.000 a 3.000 palabras, sin contar tablas, anexos ni referencias |
 | Formato | PDF, letra 12, interlineado 1,5, normas APA 7 |
 

@@ -1,0 +1,688 @@
+---
+title: "Taller: medidas de tendencia central, dispersión y forma"
+subtitle: "Análisis Cuantitativo · Ejemplos sociológicos con datos públicos en línea"
+author: "Oscar Javier Maldonado · Universidad del Rosario"
+date: today
+lang: es
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: false
+    df-print: paged
+execute:
+  warning: false
+  message: false
+---
+
+# Presentación
+
+Cuando un informe dice "el colombiano promedio", "el ingreso típico" o "la desigualdad entre países", detrás hay una decisión técnica: **qué número resume a muchos**. Adolphe Quetelet inventó en el siglo XIX al *homme moyen* (el "hombre medio") y lo trató como si fuera un tipo social real; Francis Galton, unas décadas después, se interesó más por la **variación** alrededor de ese promedio que por el promedio mismo. Este taller recorre esa tensión con datos actuales.
+
+**Objetivos.** Al terminar, cada estudiante podrá:
+
+1. Calcular e interpretar media, mediana, moda, media recortada, media ponderada y media geométrica, y saber cuándo usar cada una.
+2. Calcular e interpretar rango, rango intercuartílico, varianza, desviación estándar, coeficiente de variación, desviación absoluta mediana y razones de percentiles.
+3. Describir la forma de una distribución (asimetría y curtosis) y relacionarla con la elección de la medida de tendencia central.
+4. Descargar datos públicos desde R mediante API o URL y dejarlos guardados para trabajar sin conexión.
+
+**Datos que usaremos.**
+
+| Base | Fuente | Acceso | Unidad de análisis | Para qué |
+|---|---|---|---|---|
+| Indicadores de Desarrollo Mundial (WDI) | Banco Mundial | API, paquete `WDI` | País | Gini, homicidios, desempleo, PIB per cápita |
+| General Social Survey 2022 (GSS) | NORC, Universidad de Chicago | Paquete `gssr` | Persona | Ingreso, horas trabajadas, escolaridad |
+| Esperanza de vida 1950–hoy | Our World in Data | CSV en línea | País-año | Convergencia (¿se reduce la dispersión en el tiempo?) |
+
+**Duración sugerida:** dos sesiones de 90 minutos (secciones 1–4 en la primera; 5–7 en la segunda).
+
+::: {.callout-tip}
+## Cómo usar este archivo
+Abra este `.qmd` en RStudio. Ejecute los bloques de código uno por uno con **Ctrl + Enter** (Cmd + Enter en Mac) o el botón verde ▶ de cada bloque. Al final puede presionar **Render** para obtener un informe HTML. Los bloques marcados con ✍️ son ejercicios para resolver en grupo.
+:::
+
+# Preparación
+
+## Paquetes
+
+```{r instalar}
+#| eval: false
+# Ejecute esto UNA sola vez (si no tiene los paquetes instalados)
+install.packages(c("tidyverse", "WDI", "scales", "haven"))
+
+# gssr no está en CRAN: se instala desde el repositorio de su autor (Kieran Healy)
+install.packages("gssr",
+                 repos = c("https://kjhealy.r-universe.dev",
+                           "https://cloud.r-project.org"))
+```
+
+```{r paquetes}
+library(tidyverse)  # manipulación y gráficos
+library(WDI)        # API del Banco Mundial
+library(scales)     # formato de números en gráficos
+library(haven)      # manejo de variables etiquetadas (GSS)
+
+theme_set(theme_minimal(base_size = 12))
+```
+
+## Funciones propias
+
+R trae `mean()`, `median()`, `var()`, `sd()`, `IQR()` y `mad()`, pero **no** trae funciones para la moda, la asimetría o la curtosis. Escribirlas nosotros mismos tiene una ventaja pedagógica: obliga a entender la fórmula.
+
+```{r funciones}
+# Moda: el valor (o categoría) más frecuente
+moda <- function(x) {
+  x <- x[!is.na(x)]
+  tabla <- table(x)
+  names(tabla)[tabla == max(tabla)]   # devuelve todas si hay empate
+}
+
+# Media geométrica: raíz n-ésima del producto (solo valores positivos)
+media_geom <- function(x) {
+  x <- x[!is.na(x) & x > 0]
+  exp(mean(log(x)))
+}
+
+# Coeficiente de variación: desviación estándar relativa a la media
+cv <- function(x) sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE)
+
+# Asimetría (coeficiente de Fisher, g1)
+#   > 0: cola larga a la derecha | < 0: cola larga a la izquierda | ≈ 0: simétrica
+asimetria <- function(x) {
+  x <- x[!is.na(x)]
+  m <- mean(x)
+  mean((x - m)^3) / (mean((x - m)^2))^(3/2)
+}
+
+# Curtosis en exceso (g2): 0 en la distribución normal
+#   > 0: colas pesadas / valores extremos frecuentes | < 0: colas livianas
+curtosis <- function(x) {
+  x <- x[!is.na(x)]
+  m <- mean(x)
+  mean((x - m)^4) / (mean((x - m)^2))^2 - 3
+}
+
+# Coeficiente de Gini a partir de datos individuales
+gini <- function(x) {
+  x <- sort(x[!is.na(x)])
+  n <- length(x)
+  sum((2 * seq_len(n) - n - 1) * x) / (n * sum(x))
+}
+```
+
+::: {.callout-note}
+Los paquetes `moments` o `e1071` tienen funciones `skewness()` y `kurtosis()`. Si los usa, verá diferencias pequeñas con las nuestras: hay varias fórmulas (con y sin corrección por tamaño de muestra). Con muestras grandes la diferencia es despreciable.
+:::
+
+# Los datos
+
+Todas las descargas se guardan en un archivo `.rds` local. Así, la segunda vez que ejecute el código (o si falla la conexión en clase) R lee la copia guardada y no vuelve a llamar a la API.
+
+## Banco Mundial (API WDI): países
+
+Cada indicador del Banco Mundial tiene un código. Puede buscarlos con `WDIsearch("gini")` o en <https://data.worldbank.org/indicator>.
+
+```{r wdi-descarga}
+indicadores <- c(
+  gini        = "SI.POV.GINI",        # Índice de Gini (0–100)
+  homicidios  = "VC.IHR.PSRC.P5",     # Homicidios intencionales por 100.000 hab.
+  desempleo   = "SL.UEM.TOTL.ZS",     # Desempleo, % de la fuerza laboral (OIT)
+  pib_pc      = "NY.GDP.PCAP.PP.KD",  # PIB per cápita, PPA, dólares internacionales constantes
+  poblacion   = "SP.POP.TOTL"         # Población total
+)
+
+if (file.exists("datos_wdi.rds")) {
+  wdi_crudo <- readRDS("datos_wdi.rds")
+} else {
+  wdi_crudo <- WDI(country = "all", indicator = indicadores,
+                   start = 2012, end = 2024, extra = TRUE)
+  saveRDS(wdi_crudo, "datos_wdi.rds")
+}
+```
+
+Dos problemas típicos de los datos comparativos: la API incluye **agregados** (regiones, grupos de ingreso, "Mundo") que no son países, y el Gini **no se mide todos los años** en todos los países (depende de que haya una encuesta de hogares). Por eso nos quedamos con el **último dato disponible** de cada indicador entre 2012 y 2024.
+
+```{r wdi-limpieza}
+ultimo_dato <- function(valor, anio) {
+  ok <- !is.na(valor)
+  if (!any(ok)) return(NA_real_)
+  valor[ok][which.max(anio[ok])]
+}
+
+paises <- wdi_crudo |>
+  filter(region != "Aggregates", !is.na(region)) |>
+  group_by(iso3c, country, region, income) |>
+  summarise(across(all_of(names(indicadores)), ~ ultimo_dato(.x, year)),
+            .groups = "drop")
+
+glimpse(paises)
+```
+
+## General Social Survey 2022: personas
+
+La GSS es una de las encuestas sociológicas más largas del mundo (Estados Unidos, desde 1972). Usaremos variables individuales:
+
+- `realrinc`: ingreso personal del encuestado (dólares constantes)
+- `hrs1`: horas trabajadas la semana anterior
+- `educ`: años de escolaridad
+- `degree`: máximo nivel educativo alcanzado (categórica)
+- `sex`: sexo del encuestado
+- `wtssps`: factor de expansión (peso muestral)
+
+```{r gss-descarga}
+if (file.exists("datos_gss2022.rds")) {
+  gss_crudo <- readRDS("datos_gss2022.rds")
+} else {
+  library(gssr)
+  gss_crudo <- gss_get_yr(2022)       # descarga el año desde NORC
+  gss_crudo <- gss_crudo |>
+    select(realrinc, hrs1, educ, degree, sex, age, wtssps)
+  saveRDS(gss_crudo, "datos_gss2022.rds")
+}
+```
+
+Las variables de la GSS vienen **etiquetadas** (como en Stata o SPSS). Convertimos las numéricas en números y las categóricas en factores. Los códigos de "no responde" o "no aplica" se vuelven `NA`.
+
+```{r gss-limpieza}
+gss <- gss_crudo |>
+  mutate(
+    ingreso  = as.numeric(zap_labels(realrinc)),
+    horas    = as.numeric(zap_labels(hrs1)),
+    educ     = as.numeric(zap_labels(educ)),
+    edad     = as.numeric(zap_labels(age)),
+    peso     = as.numeric(zap_labels(wtssps)),
+    nivel_ed = as_factor(degree),
+    sexo     = as_factor(sex)
+  ) |>
+  select(ingreso, horas, educ, edad, peso, nivel_ed, sexo)
+
+summary(gss)
+```
+
+::: {.callout-warning}
+## Si `gssr` no se instala
+Descargue manualmente el archivo de Stata de 2022 desde <https://gss.norc.org/get-the-data/stata> y léalo con `gss_crudo <- haven::read_dta("GSS2022.dta")`. El resto del código funciona igual.
+:::
+
+## Our World in Data: esperanza de vida en el tiempo
+
+Our World in Data publica cada gráfico como un CSV descargable con solo agregar `.csv` a la URL.
+
+```{r owid-descarga}
+url_owid <- "https://ourworldindata.org/grapher/life-expectancy.csv?v=1&csvType=full&useColumnShortNames=true"
+
+if (file.exists("datos_owid_ev.rds")) {
+  ev_crudo <- readRDS("datos_owid_ev.rds")
+} else {
+  ev_crudo <- read_csv(url_owid, show_col_types = FALSE)
+  saveRDS(ev_crudo, "datos_owid_ev.rds")
+}
+
+# Las cuatro primeras columnas son: entidad, código, año y valor
+esperanza <- ev_crudo |>
+  select(1:4) |>
+  set_names(c("pais", "codigo", "anio", "esperanza_vida")) |>
+  # Quitamos agregados (continentes, "World"), que no tienen código ISO de 3 letras
+  filter(!is.na(codigo), !str_starts(codigo, "OWID"))
+
+head(esperanza)
+```
+
+# Medidas de tendencia central
+
+## Media, mediana y moda: el ingreso en la GSS
+
+Empecemos por la pregunta más sencilla: ¿cuánto gana una persona "típica" en Estados Unidos?
+
+```{r central-ingreso}
+ingreso <- gss$ingreso[!is.na(gss$ingreso)]
+
+tibble(
+  n       = length(ingreso),
+  media   = mean(ingreso),
+  mediana = median(ingreso)
+)
+```
+
+La media es bastante mayor que la mediana. Veamos por qué:
+
+```{r hist-ingreso}
+ggplot(gss, aes(x = ingreso)) +
+  geom_histogram(bins = 50, fill = "grey70", colour = "white") +
+  geom_vline(aes(xintercept = mean(ingreso, na.rm = TRUE), colour = "Media"),
+             linewidth = 1) +
+  geom_vline(aes(xintercept = median(ingreso, na.rm = TRUE), colour = "Mediana"),
+             linewidth = 1, linetype = "dashed") +
+  scale_x_continuous(labels = label_dollar()) +
+  scale_colour_manual(values = c(Media = "#C0392B", Mediana = "#2471A3")) +
+  labs(title = "Ingreso personal, GSS 2022",
+       x = "Ingreso anual (dólares constantes)", y = "Personas", colour = NULL)
+```
+
+La distribución del ingreso tiene una **cola larga a la derecha**: pocas personas con ingresos muy altos "jalan" la media hacia arriba, mientras la mediana (el valor que deja al 50 % por debajo) no se mueve.
+
+**Experimento mental.** ¿Qué pasa si a la muestra entra una persona con un ingreso de 50 millones de dólares?
+
+```{r millonario}
+ingreso_con_millonario <- c(ingreso, 50e6)
+
+tibble(
+  medida = c("Media", "Mediana"),
+  sin_millonario = c(mean(ingreso), median(ingreso)),
+  con_millonario = c(mean(ingreso_con_millonario), median(ingreso_con_millonario))
+) |>
+  mutate(cambio = con_millonario - sin_millonario)
+```
+
+Una sola persona de entre miles mueve la media; la mediana prácticamente no cambia. Por eso decimos que la mediana es **robusta** frente a valores extremos. Es la razón por la que el DANE, la OCDE y casi todas las oficinas estadísticas reportan el ingreso **mediano** de los hogares.
+
+### La moda: para variables categóricas
+
+La media y la mediana requieren números (o al menos un orden). Para variables nominales, la única medida de tendencia central posible es la **moda**.
+
+```{r moda}
+moda(gss$nivel_ed)
+
+gss |>
+  count(nivel_ed) |>
+  mutate(porcentaje = n / sum(n) * 100)
+```
+
+::: {.callout-important}
+## ✍️ Ejercicio 1
+a) Calcule la media, la mediana y la moda de `horas` (horas trabajadas la semana pasada). ¿Por qué la moda es tan "redonda"? ¿Qué nos dice eso sobre cómo responden las personas y sobre la regulación de la jornada laboral?
+b) ¿Tiene sentido calcular la media de `nivel_ed`? ¿Y la mediana? Justifique a partir del nivel de medición de la variable.
+:::
+
+## Media recortada
+
+La media recortada elimina un porcentaje de casos en cada extremo antes de promediar. Es un punto intermedio entre la media (usa todo) y la mediana (usa solo el centro).
+
+```{r recortada}
+tibble(
+  media           = mean(ingreso),
+  recortada_5     = mean(ingreso, trim = 0.05),
+  recortada_10    = mean(ingreso, trim = 0.10),
+  recortada_25    = mean(ingreso, trim = 0.25),
+  mediana         = median(ingreso)
+)
+```
+
+A medida que recortamos más, la media se acerca a la mediana. (Con `trim = 0.5` serían idénticas.)
+
+## Media ponderada: ¿el promedio de qué?
+
+### Pesos de encuesta
+
+La GSS no es una muestra aleatoria simple: algunos grupos están sobrerrepresentados por diseño o por diferencias en la tasa de respuesta. El **factor de expansión** (`peso`) corrige eso.
+
+```{r ponderada-gss}
+gss |>
+  filter(!is.na(ingreso), !is.na(peso)) |>
+  summarise(media_sin_ponderar = mean(ingreso),
+            media_ponderada    = weighted.mean(ingreso, w = peso))
+```
+
+### Promediar países o promediar personas
+
+Ahora con el Banco Mundial. ¿Cuál es el Gini "promedio del mundo"? Depende de si cada país cuenta lo mismo o si cada persona cuenta lo mismo.
+
+```{r ponderada-gini}
+paises |>
+  filter(!is.na(gini), !is.na(poblacion)) |>
+  summarise(
+    n_paises            = n(),
+    media_simple        = mean(gini),
+    media_ponderada_pob = weighted.mean(gini, w = poblacion),
+    mediana             = median(gini)
+  )
+```
+
+En la media simple, Islandia pesa lo mismo que India. En la ponderada por población, cada habitante cuenta igual. Ninguna es "la correcta": responden **preguntas distintas** (¿cómo es el país típico? / ¿en qué nivel de desigualdad vive la persona típica?).
+
+## Media geométrica
+
+La media geométrica es apropiada para cantidades que se **multiplican** (tasas de crecimiento, razones) o que varían en órdenes de magnitud, como el PIB per cápita. Desde 2010 el PNUD calcula el **Índice de Desarrollo Humano** como la media geométrica de sus tres dimensiones (salud, educación e ingreso), precisamente para que un mal desempeño en una dimensión no se compense del todo con otra.
+
+```{r geometrica}
+paises |>
+  filter(!is.na(pib_pc)) |>
+  summarise(media_aritmetica = mean(pib_pc),
+            media_geometrica = media_geom(pib_pc),
+            mediana          = median(pib_pc))
+```
+
+::: {.callout-important}
+## ✍️ Ejercicio 2
+Un municipio tiene tres dimensiones de un índice de bienestar con valores 0,9; 0,8 y 0,1. Otro tiene 0,6; 0,6 y 0,6. Calcule la media aritmética y la geométrica de cada uno. ¿Cuál municipio "gana" con cada medida? ¿Qué supuesto normativo sobre la compensación entre dimensiones hay detrás de cada elección?
+:::
+
+# Medidas de dispersión
+
+Dos países pueden tener la misma media y vidas sociales completamente distintas. La dispersión mide **cuánto se alejan los casos del centro**.
+
+## Rango, cuartiles y rango intercuartílico
+
+Usemos la tasa de homicidios por país.
+
+```{r dispersion-homicidios}
+hom <- paises |> filter(!is.na(homicidios))
+
+tibble(
+  minimo   = min(hom$homicidios),
+  q1       = quantile(hom$homicidios, 0.25),
+  mediana  = median(hom$homicidios),
+  q3       = quantile(hom$homicidios, 0.75),
+  maximo   = max(hom$homicidios),
+  rango    = diff(range(hom$homicidios)),
+  ric      = IQR(hom$homicidios)
+)
+
+# ¿Qué países están en los extremos?
+hom |> slice_max(homicidios, n = 8) |> select(country, region, homicidios)
+hom |> slice_min(homicidios, n = 5) |> select(country, region, homicidios)
+```
+
+El **rango** depende solo de los dos casos más extremos, así que es muy sensible a valores atípicos. El **rango intercuartílico (RIC)** mide la amplitud del 50 % central de los casos.
+
+El diagrama de caja (boxplot) resume justamente estas medidas: la caja va de Q1 a Q3, la línea interior es la mediana y los puntos aislados son casos a más de 1,5 × RIC de la caja.
+
+```{r boxplot-region}
+#| fig-height: 5
+ggplot(hom, aes(x = homicidios, y = fct_reorder(region, homicidios, median))) +
+  geom_boxplot(fill = "grey90", outlier.colour = "#C0392B") +
+  geom_point(data = filter(hom, iso3c == "COL"), colour = "#C0392B", size = 3) +
+  geom_text(data = filter(hom, iso3c == "COL"), label = "Colombia",
+            vjust = -1.2, colour = "#C0392B") +
+  labs(title = "Homicidios intencionales por 100.000 habitantes",
+       subtitle = "Último dato disponible por país, Banco Mundial",
+       x = "Tasa de homicidios", y = NULL)
+```
+
+## Varianza y desviación estándar
+
+La **varianza** es el promedio de las distancias al cuadrado respecto de la media; la **desviación estándar (DE)** es su raíz cuadrada, y por eso queda en las mismas unidades que la variable.
+
+$$s^2 = \frac{\sum_{i=1}^{n}(x_i - \bar{x})^2}{n-1} \qquad s = \sqrt{s^2}$$
+
+Calculémosla "a mano" y comparemos con la función de R:
+
+```{r varianza-mano}
+x <- paises$desempleo[!is.na(paises$desempleo)]
+
+desvios          <- x - mean(x)
+varianza_manual  <- sum(desvios^2) / (length(x) - 1)
+
+tibble(varianza_manual = varianza_manual,
+       varianza_R      = var(x),
+       de_manual       = sqrt(varianza_manual),
+       de_R            = sd(x))
+```
+
+::: {.callout-note}
+¿Por qué dividir entre $n-1$ y no entre $n$? Porque al estimar la media con los mismos datos "gastamos" un grado de libertad: los desvíos respecto de la media muestral siempre suman cero. Dividir entre $n-1$ corrige el sesgo hacia abajo. Con $n$ grande la diferencia es mínima.
+:::
+
+### Puntajes z: ¿dónde queda Colombia?
+
+Con la media y la DE podemos estandarizar: el **puntaje z** dice a cuántas desviaciones estándar de la media está un caso. Permite comparar variables con unidades distintas.
+
+```{r puntajes-z}
+paises_z <- paises |>
+  mutate(across(c(gini, homicidios, desempleo, pib_pc),
+                ~ (.x - mean(.x, na.rm = TRUE)) / sd(.x, na.rm = TRUE),
+                .names = "z_{.col}"))
+
+paises_z |>
+  filter(iso3c %in% c("COL", "CHL", "MEX", "PER", "BRA", "URY")) |>
+  select(country, starts_with("z_"))
+```
+
+Un z de +2 en homicidios significa que el país está dos desviaciones estándar por encima del promedio mundial. ¿En qué indicador se aleja más Colombia de la media?
+
+## Coeficiente de variación: comparar dispersiones con unidades distintas
+
+¿Varían más los países en desempleo o en PIB per cápita? La DE no sirve para responder, porque una está en puntos porcentuales y la otra en dólares. El **coeficiente de variación** (CV = DE / media) es adimensional.
+
+```{r cv}
+paises |>
+  summarise(across(c(gini, desempleo, homicidios, pib_pc),
+                   list(media = ~ mean(.x, na.rm = TRUE),
+                        de    = ~ sd(.x, na.rm = TRUE),
+                        cv    = ~ cv(.x)))) |>
+  pivot_longer(everything(),
+               names_to = c("indicador", ".value"),
+               names_pattern = "(.*)_(media|de|cv)$") |>
+  arrange(desc(cv))
+```
+
+## Medidas robustas de dispersión
+
+Así como la mediana es la alternativa robusta a la media, la **desviación absoluta mediana (MAD)** y el RIC son alternativas robustas a la DE. Volvamos al ingreso:
+
+```{r robustas}
+tibble(
+  medida = c("DE", "RIC", "MAD"),
+  sin_millonario = c(sd(ingreso), IQR(ingreso), mad(ingreso)),
+  con_millonario = c(sd(ingreso_con_millonario), IQR(ingreso_con_millonario),
+                     mad(ingreso_con_millonario))
+)
+```
+
+## Razones de percentiles y Gini: la dispersión como desigualdad
+
+En los estudios de desigualdad, la dispersión del ingreso **es** el objeto de estudio. Dos medidas muy usadas:
+
+- **Razón P90/P10**: cuántas veces gana la persona del percentil 90 respecto a la del percentil 10.
+- **Coeficiente de Gini**: la diferencia media entre todos los pares de personas, relativa a la media (0 = igualdad perfecta; 1 = una persona tiene todo).
+
+```{r desigualdad-gss}
+gss |>
+  filter(!is.na(ingreso), !is.na(sexo)) |>
+  group_by(sexo) |>
+  summarise(
+    n         = n(),
+    media     = mean(ingreso),
+    mediana   = median(ingreso),
+    de        = sd(ingreso),
+    p10       = quantile(ingreso, 0.10),
+    p90       = quantile(ingreso, 0.90),
+    p90_p10   = p90 / p10,
+    gini      = gini(ingreso)
+  )
+```
+
+::: {.callout-important}
+## ✍️ Ejercicio 3
+a) Con la tabla anterior, calcule la brecha salarial de género usando la media y usando la mediana: $(\text{hombres} - \text{mujeres}) / \text{hombres}$. ¿Cuál es mayor? ¿Qué parte de la distribución explica la diferencia?
+b) Repita la tabla agrupando por `nivel_ed`. ¿En qué nivel educativo es mayor la desigualdad interna (P90/P10 y Gini)?
+c) ¿Qué problema tiene comparar estos ingresos sin tener en cuenta las horas trabajadas? Proponga una variable nueva para corregirlo.
+:::
+
+## La dispersión en el tiempo: ¿convergen los países?
+
+En demografía y sociología del desarrollo se habla de **convergencia sigma** cuando la dispersión entre países disminuye con el tiempo. Calculemos la DE y el CV de la esperanza de vida entre países, año por año.
+
+```{r convergencia}
+convergencia <- esperanza |>
+  filter(anio >= 1950) |>
+  group_by(anio) |>
+  summarise(n       = n(),
+            media   = mean(esperanza_vida),
+            de      = sd(esperanza_vida),
+            cv      = cv(esperanza_vida),
+            ric     = IQR(esperanza_vida))
+
+ggplot(convergencia, aes(x = anio, y = de)) +
+  geom_line(linewidth = 1, colour = "#2471A3") +
+  labs(title = "Dispersión de la esperanza de vida entre países",
+       subtitle = "Desviación estándar, Our World in Data",
+       x = NULL, y = "Desviación estándar (años)")
+```
+
+::: {.callout-important}
+## ✍️ Ejercicio 4
+a) Describa la tendencia. ¿Hay años en que la dispersión aumenta abruptamente? ¿Qué acontecimientos históricos podrían explicarlo (piense en la epidemia de VIH en África austral y en 2020–2021)?
+b) Grafique el CV en lugar de la DE. ¿Cambia la conclusión? ¿Por qué podría cambiar?
+:::
+
+# Medidas de forma
+
+La forma de una distribución nos dice **qué medida de tendencia central y de dispersión conviene usar**.
+
+## Asimetría
+
+```{r asimetria}
+tibble(
+  variable  = c("Ingreso (GSS)", "Horas trabajadas (GSS)", "Años de escolaridad (GSS)",
+                "Homicidios (países)", "Gini (países)", "Desempleo (países)"),
+  asimetria = c(asimetria(gss$ingreso), asimetria(gss$horas), asimetria(gss$educ),
+                asimetria(paises$homicidios), asimetria(paises$gini),
+                asimetria(paises$desempleo)),
+  curtosis  = c(curtosis(gss$ingreso), curtosis(gss$horas), curtosis(gss$educ),
+                curtosis(paises$homicidios), curtosis(paises$gini),
+                curtosis(paises$desempleo))
+) |>
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+```
+
+Regla práctica para leer la asimetría:
+
+| Valor | Interpretación | Relación media–mediana |
+|---|---|---|
+| ≈ 0 (entre −0,5 y 0,5) | Aproximadamente simétrica | Media ≈ mediana |
+| > 0,5 | Asimetría positiva (cola a la derecha) | Media > mediana |
+| < −0,5 | Asimetría negativa (cola a la izquierda) | Media < mediana |
+
+Un atajo útil es el **coeficiente de asimetría de Pearson**, que usa solo media, mediana y DE:
+
+$$\text{Asimetría de Pearson} = \frac{3(\bar{x} - \text{mediana})}{s}$$
+
+```{r pearson}
+pearson_asim <- function(x) 3 * (mean(x, na.rm = TRUE) - median(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+
+c(ingreso = pearson_asim(gss$ingreso),
+  escolaridad = pearson_asim(gss$educ))
+```
+
+Visualicemos tres formas distintas lado a lado:
+
+```{r tres-formas}
+#| fig-height: 4
+bind_rows(
+  tibble(variable = "Ingreso (asimetría +)",        valor = gss$ingreso),
+  tibble(variable = "Horas trabajadas (picuda)",    valor = gss$horas),
+  tibble(variable = "Escolaridad (asimetría −)",    valor = gss$educ)
+) |>
+  filter(!is.na(valor)) |>
+  group_by(variable) |>
+  mutate(media = mean(valor), mediana = median(valor)) |>
+  ggplot(aes(x = valor)) +
+  geom_histogram(bins = 30, fill = "grey70", colour = "white") +
+  geom_vline(aes(xintercept = media),   colour = "#C0392B", linewidth = 0.8) +
+  geom_vline(aes(xintercept = mediana), colour = "#2471A3", linewidth = 0.8, linetype = "dashed") +
+  facet_wrap(~ variable, scales = "free") +
+  labs(title = "Tres formas de distribución en la GSS 2022",
+       subtitle = "Línea roja: media · Línea azul punteada: mediana",
+       x = NULL, y = "Personas")
+```
+
+## Curtosis
+
+La curtosis describe el peso de las colas: qué tan frecuentes son los valores extremos comparados con una distribución normal. Una curtosis en exceso alta (como la de los homicidios entre países) indica que la mayoría de casos se concentra cerca del centro, pero hay unos pocos muy alejados. En términos sociológicos: **la excepción no es tan excepcional**.
+
+```{r curtosis-hom}
+ggplot(hom, aes(x = homicidios)) +
+  geom_histogram(bins = 40, fill = "grey70", colour = "white") +
+  geom_vline(xintercept = mean(hom$homicidios), colour = "#C0392B", linewidth = 1) +
+  geom_vline(xintercept = median(hom$homicidios), colour = "#2471A3",
+             linewidth = 1, linetype = "dashed") +
+  labs(title = "Distribución de la tasa de homicidios entre países",
+       subtitle = paste0("Asimetría = ", round(asimetria(hom$homicidios), 2),
+                         " · Curtosis en exceso = ", round(curtosis(hom$homicidios), 2)),
+       x = "Homicidios por 100.000 hab.", y = "Países")
+```
+
+## Transformar para corregir la asimetría
+
+Cuando una variable es muy asimétrica a la derecha (ingresos, tasas, tamaños de ciudades), es común analizarla en **logaritmos**. El logaritmo convierte diferencias multiplicativas en diferencias aditivas.
+
+```{r log}
+gss_pos <- gss |> filter(ingreso > 0)
+
+tibble(
+  escala     = c("Ingreso original", "log(ingreso)"),
+  asimetria  = c(asimetria(gss_pos$ingreso), asimetria(log(gss_pos$ingreso))),
+  media      = c(mean(gss_pos$ingreso), mean(log(gss_pos$ingreso))),
+  mediana    = c(median(gss_pos$ingreso), median(log(gss_pos$ingreso)))
+)
+
+# Dato curioso: exp(media de los logaritmos) es la media geométrica
+c(exp_media_log = exp(mean(log(gss_pos$ingreso))),
+  media_geom    = media_geom(gss_pos$ingreso))
+```
+
+```{r log-graf}
+#| fig-height: 4
+ggplot(gss_pos, aes(x = ingreso)) +
+  geom_histogram(bins = 40, fill = "grey70", colour = "white") +
+  scale_x_log10(labels = label_dollar()) +
+  labs(title = "Ingreso personal en escala logarítmica",
+       x = "Ingreso anual (escala log)", y = "Personas")
+```
+
+# Todo junto: una tabla descriptiva completa
+
+En un artículo o informe, las medidas se presentan juntas. Esta función produce una tabla descriptiva para cualquier variable numérica, por grupos:
+
+```{r tabla-final}
+describir <- function(datos, variable, grupo) {
+  datos |>
+    filter(!is.na({{ variable }}), !is.na({{ grupo }})) |>
+    group_by({{ grupo }}) |>
+    summarise(
+      n          = n(),
+      media      = mean({{ variable }}),
+      mediana    = median({{ variable }}),
+      de         = sd({{ variable }}),
+      cv         = cv({{ variable }}),
+      ric        = IQR({{ variable }}),
+      asimetria  = asimetria({{ variable }}),
+      curtosis   = curtosis({{ variable }}),
+      .groups = "drop"
+    ) |>
+    mutate(across(where(is.double), ~ round(.x, 2)))
+}
+
+describir(paises, gini, region)
+describir(gss, horas, sexo)
+```
+
+::: {.callout-important}
+## ✍️ Ejercicio 5 (integrador)
+En grupos de tres:
+
+1. Escojan **un indicador** del Banco Mundial que les interese sociológicamente (busquen con `WDIsearch("palabra")`; por ejemplo, matrícula escolar, mujeres en el parlamento, empleo informal, gasto en salud).
+2. Descárguenlo con `WDI()` y describan su distribución entre países: tendencia central, dispersión y forma.
+3. Decidan **cuál medida de tendencia central y cuál de dispersión reportarían** en un informe de prensa, y justifiquen la elección a partir de la forma de la distribución.
+4. Ubiquen a Colombia con un puntaje z y un percentil (pista: `ecdf(x)(valor_colombia)`).
+5. Escriban un párrafo de máximo 150 palabras que podría aparecer en un periódico.
+:::
+
+# Para la discusión
+
+- Quetelet pensaba que la media revelaba un "tipo" social verdadero y que la variación era error. ¿Qué se pierde cuando informamos solo el promedio de una población? ¿Quiénes desaparecen?
+- Alain Desrosières (*La política de los grandes números*) mostró que las estadísticas no solo describen la sociedad: también la hacen gobernable. Elegir entre media y mediana, o entre ponderar por país o por persona, ¿es una decisión técnica o política?
+- Los promedios por país esconden la desigualdad interna. Colombia tiene un PIB per cápita "medio" a escala mundial y, a la vez, uno de los Gini más altos. ¿Qué medida pondrían en un titular?
+
+# Referencias de datos
+
+- Banco Mundial. *World Development Indicators*. <https://databank.worldbank.org/source/world-development-indicators>. Paquete R: Arel-Bundock, V. `WDI`.
+- Davern, M., Bautista, R., Freese, J., Herd, P. y Morgan, S. L. *General Social Survey 1972–2022*. NORC, Universidad de Chicago. <https://gss.norc.org>. Paquete R: Healy, K. `gssr`.
+- Our World in Data. *Life expectancy*. <https://ourworldindata.org/life-expectancy>.
+
+```{r sesion}
+#| echo: false
+sessionInfo()
+```

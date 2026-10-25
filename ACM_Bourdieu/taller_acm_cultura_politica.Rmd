@@ -1,0 +1,661 @@
+---
+title: "Taller: Análisis de Correspondencias Múltiples (ACM) aplicado a la cultura política en América Latina"
+subtitle: "Datos públicos del Barómetro de las Américas (LAPOP), ronda 2023"
+author: "Análisis Cuantitativo · Departamento de Sociología, Universidad del Rosario"
+date: "`r format(Sys.Date(), '%d/%m/%Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    theme: flatly
+    df_print: kable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.width = 9, fig.height = 6.5, fig.align = "center",
+                      dpi = 110)
+```
+
+# Presentación
+
+## ¿De qué trata este taller?
+
+El Análisis de Correspondencias Múltiples (ACM) es una técnica de **análisis geométrico de datos** diseñada para variables cualitativas. En lugar de partir de un modelo con variable dependiente e independientes, el ACM construye un **espacio** a partir de las relaciones entre muchas variables categóricas a la vez, y nos permite leer en ese espacio **oposiciones** entre modalidades de respuesta y **posiciones** de individuos y grupos.
+
+En sociología, el ACM tiene una historia particular: es la técnica con la que Pierre Bourdieu construyó el "espacio social" y el "espacio de los estilos de vida" en *La distinción* (1979), y la tradición francesa (Benzécri, Le Roux y Rouanet) la defendió como una forma de "dejar hablar a los datos" antes de imponerles un modelo. Aquí la usaremos para una pregunta clásica de la sociología política:
+
+> **¿Cómo se estructura la cultura política en América Latina?** ¿Qué actitudes hacia las instituciones y la democracia "van juntas"? ¿Esas configuraciones dependen de la posición social de las personas (educación, riqueza, género) o del país en el que viven?
+
+## Objetivos de aprendizaje
+
+Al terminar el taller, cada estudiante podrá:
+
+1. Preparar variables de encuesta (con etiquetas de *haven*) para un ACM, justificando sus recodificaciones.
+2. Estimar un ACM con `FactoMineR`, distinguiendo variables **activas** y **suplementarias**.
+3. Leer los resultados: valores propios (y su corrección de Benzécri), contribuciones, cos², razones de correlación (η²) y valores test.
+4. Interpretar sociológicamente los ejes como **oposiciones** y reconocer artefactos como el **efecto Guttman** (arco).
+5. Construir una **tipología** de culturas políticas mediante clasificación jerárquica sobre los ejes del ACM (HCPC).
+
+## Organización sugerida (≈ 3 horas)
+
+| Bloque | Contenido | Tiempo |
+|---|---|---|
+| 1 | Marco: ACM y cultura política | 20 min |
+| 2 | Datos, exploración y recodificación | 35 min |
+| 3 | Estimación del ACM e inercia | 25 min |
+| 4 | Interpretación de ejes (activas) | 35 min |
+| 5 | Variables suplementarias: país y posición social | 25 min |
+| 6 | Tipología (HCPC) y caso Colombia | 30 min |
+| 7 | Ejercicios y discusión | 10 min + tarea |
+
+## Paquetes
+
+Ejecute una sola vez la instalación (si no tiene los paquetes):
+
+```{r instalar, eval=FALSE}
+install.packages(c("haven", "dplyr", "tidyr", "ggplot2", "ggrepel",
+                   "FactoMineR", "factoextra", "knitr"))
+```
+
+```{r paquetes}
+library(haven)       # leer y manejar variables etiquetadas (Stata/SPSS)
+library(dplyr)       # manipulación de datos
+library(tidyr)       # reorganizar tablas
+library(ggplot2)     # gráficos
+library(ggrepel)     # etiquetas que no se superponen
+library(FactoMineR)  # ACM y clasificación (HCPC)
+library(factoextra)  # visualización de resultados de FactoMineR
+library(knitr)       # tablas
+```
+
+# Marco conceptual breve
+
+## ¿Qué hace el ACM?
+
+Imagine una tabla con *n* personas y *Q* preguntas cualitativas. El ACM transforma esa tabla en una **tabla disyuntiva completa** (una columna 0/1 por cada modalidad de respuesta) y busca los ejes que resumen la mayor parte de la **inercia** (la dispersión) de las personas y de las modalidades.
+
+Tres ideas clave para leer un ACM:
+
+- **Dos nubes, un mismo espacio.** Hay una nube de individuos y una nube de modalidades. Una modalidad se ubica en el centro de gravedad de las personas que la eligieron. Por eso, modalidades cercanas suelen ser elegidas por las mismas personas.
+- **Las modalidades raras pesan mucho.** Una respuesta poco frecuente queda lejos del centro y puede dominar un eje. Por eso se agrupan categorías con frecuencias muy bajas (regla práctica: menos de 5 %).
+- **Activas vs. suplementarias.** Las variables **activas** construyen el espacio; las **suplementarias** se proyectan después, sin influir en él. Esta distinción es una decisión teórica: definimos el espacio con lo que queremos describir (aquí, actitudes políticas) y luego preguntamos quién se ubica dónde (país, educación, riqueza, género).
+
+## ¿Por qué cultura política?
+
+Desde *The Civic Culture* de Almond y Verba (1963), la cultura política se estudia como la distribución de orientaciones hacia los objetos políticos. Tres distinciones nos sirven para leer los resultados:
+
+- **Apoyo difuso vs. apoyo específico** (Easton, 1975): apoyar la democracia como régimen no es lo mismo que estar satisfecho con su funcionamiento.
+- **Ciudadanos críticos** (Norris, 1999; 2011): personas que apoyan la democracia pero están insatisfechas con su desempeño.
+- **Confianza en instituciones coercitivas.** En América Latina, la confianza en Fuerzas Armadas y Policía está ligada a la seguridad, a las memorias de dictadura y a fenómenos recientes de "punitivismo popular" (por ejemplo, El Salvador desde 2019).
+
+Un ACM no "prueba" estas teorías, pero permite ver **cómo se articulan empíricamente** estas orientaciones y si producen configuraciones distintas.
+
+# Datos
+
+## Fuente
+
+Usaremos el **Barómetro de las Américas** del *Latin American Public Opinion Project* (LAPOP Lab, Vanderbilt University), la encuesta comparada de opinión pública más extensa de la región. LAPOP distribuye gratuitamente sus bases en <http://datasets.americasbarometer.org/database/>. Para el taller usamos la base `ym23` que acompaña al paquete oficial de R `lapop`: una selección de variables de la ronda 2023 (y 2018/19) para más de 20 países, con etiquetas en español.
+
+Hay dos formas de cargarla. La opción A no requiere instalar nada adicional:
+
+```{r cargar}
+# Opción A: descargar el archivo de datos directamente del repositorio del paquete
+url_datos <- "https://raw.githubusercontent.com/lapop-central/lapop/main/data/ym23.rda"
+archivo   <- file.path(tempdir(), "ym23.rda")
+download.file(url_datos, archivo, mode = "wb", quiet = TRUE)
+load(archivo)   # crea el objeto ym23
+
+# Opción B: instalar el paquete oficial de LAPOP (desde CRAN)
+# install.packages("lapop")
+# data("ym23", package = "lapop")
+
+dim(ym23)
+```
+
+> **Sugerencia para clase:** guarde una copia local con `saveRDS(ym23, "ym23.rds")` y luego cárguela con `readRDS("ym23.rds")`. Así el taller funciona sin internet.
+
+## Explorar las variables etiquetadas
+
+Las bases de LAPOP vienen de Stata, con **etiquetas de valor**. El paquete `haven` las conserva:
+
+```{r explorar}
+# Etiqueta de la pregunta y etiquetas de sus valores
+attr(ym23$ing4, "label")
+attr(ym23$ing4, "labels")
+
+# Diccionario rápido de todas las variables
+tibble(variable = names(ym23),
+       pregunta = sapply(ym23, function(x) {
+         l <- attr(x, "label"); if (is.null(l)) "(sin etiqueta)" else l
+       }))
+```
+
+Las variables sustantivas son:
+
+| Variable | Pregunta (resumida) | Escala original |
+|---|---|---|
+| `b12` | ¿Hasta qué punto tiene confianza en las Fuerzas Armadas? | 1 (nada) a 7 (mucho) |
+| `b18` | ¿Hasta qué punto tiene confianza en la Policía Nacional? | 1 a 7 |
+| `ing4` | "Puede que la democracia tenga problemas, pero es mejor que cualquier otra forma de gobierno" | 1 (muy en desacuerdo) a 7 |
+| `pn4` | Satisfacción con el funcionamiento de la democracia en su país | 1 (muy satisfecho) a 4 (muy insatisfecho) |
+| `vb21n` | ¿Cuál es la mejor manera de hacer un cambio en el país? | 6 opciones nominales |
+| `edre` | Nivel educativo | 0 a 6 |
+| `wealth` | Quintil de riqueza (índice de bienes del hogar) | 1 a 5 |
+| `q1tc_r` | Género | 1 hombre, 2 mujer, 3 otro |
+| `pais` | País | — |
+| `weight1500` | Ponderador (cada país pesa como una muestra de 1.500) | — |
+
+## Ventana temporal y países: decisiones y "datos faltantes por diseño"
+
+```{r faltantes}
+# ¿Qué proporción de datos falta por ronda?
+ym23 |>
+  mutate(ronda = as.character(wave)) |>
+  group_by(ronda) |>
+  summarise(across(c(b12, b18, ing4, pn4, vb21n, edre, q1tc_r),
+                   ~ round(mean(is.na(.x)), 2)))
+```
+
+Las preguntas `vb21n`, `edre` y `q1tc_r` solo existen en la ronda 2023 de esta base: **trabajaremos con 2023**. Ahora veamos los faltantes por país:
+
+```{r faltantes_pais}
+ym23 |>
+  filter(wave == 2023) |>
+  mutate(pais = as.character(as_factor(pais))) |>
+  group_by(pais) |>
+  summarise(n = n(),
+            sin_b12 = round(mean(is.na(b12)), 2),
+            sin_pn4 = round(mean(is.na(pn4)), 2)) |>
+  arrange(desc(sin_b12))
+```
+
+Aquí aparece una lección metodológica importante: **no todos los datos faltantes son "no respuesta"**. Costa Rica y Panamá no tienen Fuerzas Armadas, así que la pregunta `b12` no se formula allí (también ocurre en Haití, Bahamas y Granada). Esto es un faltante *estructural*: imputarlo no tendría sentido sociológico. En Nicaragua, en cambio, más de la mitad de la muestra no tiene respuesta en confianza institucional y satisfacción con la democracia; vale la pena discutir en clase qué significa medir la opinión política bajo un régimen autoritario.
+
+**Decisión del taller:** analizamos los 14 países latinoamericanos con información completa en las cinco preguntas activas. Es una decisión que delimita la población de inferencia, y debe quedar escrita en cualquier informe.
+
+```{r filtrar}
+paises <- c("México", "Guatemala", "El Salvador", "Honduras", "Colombia",
+            "Ecuador", "Bolivia", "Perú", "Paraguay", "Chile", "Uruguay",
+            "Brasil", "Argentina", "República Dominicana")
+
+d23 <- ym23 |>
+  filter(wave == 2023) |>
+  mutate(pais = as.character(as_factor(pais))) |>
+  filter(pais %in% paises)
+
+nrow(d23)
+```
+
+## Recodificación
+
+Antes de recodificar, mire las distribuciones originales:
+
+```{r distribuciones}
+table(d23$b12, useNA = "ifany")
+table(d23$vb21n, useNA = "ifany")
+```
+
+Criterios de recodificación:
+
+- **Escalas de 7 puntos → 3 modalidades** (baja 1–3, media 4, alta 5–7). Conservar los 7 valores daría 7 modalidades por pregunta, muchas con frecuencias bajas, y el ACM trataría cada punto como una categoría nominal (perdemos el orden, pero lo recuperaremos al leer el gráfico).
+- **Satisfacción con la democracia → 3 modalidades:** unimos "muy satisfecho" y "satisfecho" porque "muy satisfecho" es poco frecuente.
+- **Repertorio de cambio (`vb21n`):** unimos "votar" y "postularse como candidato" (ambas son vías electorales; postularse es muy poco frecuente).
+- **Etiquetas con prefijo:** cada modalidad lleva el nombre de su variable (`Conf. Policía: alta`), para que los gráficos se lean sin ambigüedad.
+
+```{r recodificar}
+# Función auxiliar para escalas 1-7
+tres_niveles <- function(x, prefijo) {
+  factor(case_when(x <= 3 ~ "baja", x == 4 ~ "media", x >= 5 ~ "alta"),
+         levels = c("baja", "media", "alta"),
+         labels = paste0(prefijo, ": ", c("baja", "media", "alta")))
+}
+
+datos <- d23 |>
+  transmute(
+    # --- Variables ACTIVAS (cultura política) ---
+    ffaa    = tres_niveles(b12, "Conf. FF.AA."),
+    policia = tres_niveles(b18, "Conf. Policía"),
+    apoyo_dem = factor(case_when(ing4 <= 3 ~ "no apoya",
+                                 ing4 == 4 ~ "neutral",
+                                 ing4 >= 5 ~ "apoya"),
+                       levels = c("no apoya", "neutral", "apoya"),
+                       labels = paste0("Apoyo dem.: ", c("no apoya", "neutral", "apoya"))),
+    satis_dem = factor(case_when(pn4 <= 2 ~ "satisfecho",
+                                 pn4 == 3 ~ "insatisfecho",
+                                 pn4 == 4 ~ "muy insatisfecho"),
+                       levels = c("satisfecho", "insatisfecho", "muy insatisfecho"),
+                       labels = paste0("Satisf. dem.: ", c("satisfecho", "insatisfecho", "muy insatisfecho"))),
+    cambio = factor(case_when(vb21n %in% 1:2 ~ "votar",
+                              vb21n == 3 ~ "protestar",
+                              vb21n == 4 ~ "org. comunitaria",
+                              vb21n == 5 ~ "otras maneras",
+                              vb21n == 6 ~ "no es posible"),
+                    levels = c("votar", "protestar", "org. comunitaria",
+                               "otras maneras", "no es posible"),
+                    labels = paste0("Cambio: ", c("votar", "protestar", "org. comunitaria",
+                                                  "otras maneras", "no es posible"))),
+    # --- Variables SUPLEMENTARIAS (posición social y contexto) ---
+    educ = factor(case_when(edre <= 2 ~ "primaria o menos",
+                            edre <= 4 ~ "secundaria",
+                            edre >= 5 ~ "superior"),
+                  levels = c("primaria o menos", "secundaria", "superior"),
+                  labels = paste0("Educ.: ", c("primaria o menos", "secundaria", "superior"))),
+    riqueza = factor(wealth, levels = 1:5, labels = paste0("Riqueza Q", 1:5)),
+    genero  = factor(case_when(q1tc_r == 1 ~ "Hombre", q1tc_r == 2 ~ "Mujer")),
+    pais    = factor(pais),
+    peso    = as.numeric(weight1500)
+  ) |>
+  tidyr::drop_na()   # casos completos
+
+nrow(datos)
+```
+
+Revisemos las frecuencias de las modalidades activas (¿alguna por debajo de 5 %?):
+
+```{r frecuencias}
+datos |>
+  select(ffaa:cambio) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "modalidad") |>
+  count(variable, modalidad) |>
+  group_by(variable) |>
+  mutate(porcentaje = round(100 * n / sum(n), 1))
+```
+
+> **Pregunta para discutir:** "Protestar" es la modalidad menos frecuente. ¿Qué implicaciones tiene para el ACM? ¿Qué pasaría si no hubiéramos agrupado "postularse" con "votar"?
+
+# Estimación del ACM
+
+Las columnas 1 a 5 son activas; 6 a 9, suplementarias. Usamos el ponderador de LAPOP como peso de los individuos (`row.w`).
+
+```{r acm}
+acm <- MCA(datos |> select(ffaa, policia, apoyo_dem, satis_dem, cambio,
+                           educ, riqueza, genero, pais),
+           quali.sup = 6:9,
+           row.w = datos$peso,
+           ncp = 5,
+           graph = FALSE)
+
+acm
+```
+
+## Inercia y número de ejes
+
+```{r valores_propios}
+nrow(acm$eig)
+
+round(acm$eig[1:5, ], 2)
+fviz_screeplot(acm, addlabels = TRUE, ylim = c(0, 18),
+               main = "Porcentaje de inercia por eje",
+               xlab = "Ejes", ylab = "% de inercia")
+```
+
+En el ACM los porcentajes de inercia son **bajos por construcción**: la tabla disyuntiva tiene mucha "inercia artificial" que no refleja relaciones entre variables. Por eso Benzécri propuso una **tasa modificada**, que solo considera los valores propios mayores que 1/Q (Q = número de variables activas):
+
+```{r benzecri}
+benzecri <- function(valores_propios, Q) {
+  l <- valores_propios[valores_propios > 1 / Q]
+  ajustado <- ((Q / (Q - 1)) * (l - 1 / Q))^2
+  data.frame(eje = seq_along(l),
+             valor_propio = round(l, 3),
+             tasa_modificada = round(100 * ajustado / sum(ajustado), 1),
+             acumulada = round(cumsum(100 * ajustado / sum(ajustado)), 1))
+}
+
+benzecri(acm$eig[, 1], Q = 5)
+```
+
+```{r guardar_bz, include=FALSE}
+bz <- benzecri(acm$eig[, 1], Q = 5)
+```
+
+Con la tasa modificada, el primer eje resume cerca del `r bz$tasa_modificada[1]` % de la información relevante. Es decir: hay **una oposición principal** muy marcada en la cultura política de estos países. Analizaremos los tres primeros ejes con detalle (el tercero es sociológicamente interesante aunque menos importante en inercia).
+
+# Interpretación de los ejes
+
+Para interpretar un eje usamos tres herramientas:
+
+1. **Contribuciones (`contrib`)**: cuánto aporta cada modalidad a la construcción del eje. Regla práctica: interpretar las modalidades con contribución mayor que el promedio, 100 / J (J = número total de modalidades activas).
+2. **Coordenadas (`coord`)**: de qué lado del eje está cada modalidad. El eje se lee como una **oposición** entre las modalidades de contribución alta con signo negativo y las de signo positivo.
+3. **Calidad de representación (`cos2`)**: qué tan bien representa el eje a cada modalidad.
+
+```{r umbral}
+J <- nrow(acm$var$coord)
+umbral <- 100 / J
+J; round(umbral, 2)
+```
+
+## Relación entre variables y ejes (η²)
+
+Antes de mirar modalidades, veamos qué variables están más ligadas a cada eje. El η² (razón de correlación) va de 0 a 1:
+
+```{r eta2}
+round(acm$var$eta2[, 1:3], 3)
+
+fviz_mca_var(acm, choice = "mca.cor", repel = TRUE,
+             col.var = "#2C3E50", col.quali.sup = "#E67E22",
+             title = "Variables en el plano 1-2 (η²)")
+```
+
+Las dos confianzas institucionales y la satisfacción con la democracia organizan el eje 1; el repertorio de cambio (`cambio`) apenas pesa en los dos primeros ejes, pero domina el tercero y siguientes. Observe también que **el país** (suplementaria, en azul) tiene un η² mucho mayor que educación, riqueza o género.
+
+## Eje 1: legitimidad institucional vs. desafección
+
+```{r contrib_eje1}
+fviz_contrib(acm, choice = "var", axes = 1, top = 12,
+             title = "Contribución de las modalidades al eje 1")
+
+eje1 <- data.frame(coord = round(acm$var$coord[, 1], 2),
+                   contrib = round(acm$var$contrib[, 1], 1),
+                   cos2 = round(acm$var$cos2[, 1], 2)) |>
+  arrange(coord)
+eje1
+```
+
+Lectura: en el polo **negativo** se agrupan la confianza alta en Policía y Fuerzas Armadas, la satisfacción con la democracia, el apoyo a la democracia y la vía electoral como forma de cambio. En el polo **positivo**, la desconfianza en ambas instituciones, la insatisfacción intensa, el rechazo a la democracia como mejor forma de gobierno y, en menor medida, la protesta y el "no es posible cambiar las cosas".
+
+Sociológicamente, el eje 1 opone un **síndrome de adhesión al orden institucional** a un **síndrome de desafección política**. Dos detalles importantes:
+
+- El apoyo difuso (apoyo a la democracia) y el específico (satisfacción) aparecen **del mismo lado**: en el agregado regional, quienes están satisfechos tienden también a apoyar el régimen.
+- Pero la confianza en instituciones **coercitivas** forma parte del mismo polo que el apoyo democrático. ¿Qué tipo de "legitimidad" está midiendo este eje? (Volveremos a esto con los países).
+
+## Eje 2: el efecto Guttman
+
+```{r contrib_eje2}
+fviz_contrib(acm, choice = "var", axes = 2, top = 10,
+             title = "Contribución de las modalidades al eje 2")
+```
+
+El eje 2 opone las **modalidades intermedias** (confianza media, neutralidad frente a la democracia) a los **extremos** de ambos lados. Este patrón se llama **efecto Guttman** o efecto arco: cuando las variables activas son escalas ordenadas y el eje 1 recoge un gradiente, el eje 2 suele mostrar una curva en forma de U o herradura (los extremos de un lado y del otro se acercan; el medio se separa).
+
+No es un "error", pero hay que interpretarlo con cuidado: el eje 2 dice sobre todo que existe un grupo de personas que **eligen sistemáticamente la posición media** (podría tratarse de baja intensidad política, ambivalencia o un estilo de respuesta). Esto conecta con la discusión metodológica sobre estilos de respuesta en encuestas.
+
+```{r plano_activas, fig.height=7.5}
+fviz_mca_var(acm, axes = c(1, 2), repel = TRUE,
+             invisible = "quali.sup",
+             col.var = "contrib",
+             gradient.cols = c("#AED6F1", "#2E86C1", "#C0392B"),
+             title = "Espacio de la cultura política: modalidades activas (ejes 1 y 2)") +
+  labs(x = paste0("Eje 1 (", round(acm$eig[1, 2], 1), " %): adhesión ← → desafección"),
+       y = paste0("Eje 2 (", round(acm$eig[2, 2], 1), " %): posiciones intermedias ↑"))
+```
+
+> **Ejercicio rápido:** una cada escala en el gráfico (baja → media → alta) con una línea imaginaria. ¿Ve la forma de arco?
+
+## Eje 3: eficacia política vs. fatalismo
+
+```{r contrib_eje3}
+fviz_contrib(acm, choice = "var", axes = 3, top = 10,
+             title = "Contribución de las modalidades al eje 3")
+
+data.frame(coord = round(acm$var$coord[, 3], 2),
+           contrib = round(acm$var$contrib[, 3], 1)) |>
+  arrange(coord)
+```
+
+El eje 3 opone la **organización comunitaria** y el apoyo a la democracia a la creencia de que **"no es posible influir para que las cosas cambien"** y la neutralidad frente a la democracia. Se puede leer como un eje de **eficacia política** (la sensación de que la propia acción puede producir cambios, en el sentido de Almond y Verba) frente al **fatalismo** político. Es una dimensión distinta de la confianza institucional: se puede desconfiar de la Policía y aun así creer en la acción colectiva.
+
+```{r plano_13, fig.height=7}
+fviz_mca_var(acm, axes = c(1, 3), repel = TRUE, invisible = "quali.sup",
+             col.var = "contrib", gradient.cols = c("#AED6F1", "#2E86C1", "#C0392B"),
+             title = "Modalidades activas en el plano 1-3")
+```
+
+# Variables suplementarias: ¿país o posición social?
+
+Ahora proyectamos las variables que **no** construyeron el espacio. El **valor test** (*v.test*) indica si la posición de una modalidad suplementaria se aleja significativamente del centro: valores mayores que 2 en valor absoluto se consideran significativos (aproximadamente, p < 0,05). Con muestras grandes casi todo es "significativo", así que miramos sobre todo **las distancias y los η²**.
+
+```{r suplementarias}
+data.frame(eje1 = round(acm$quali.sup$coord[, 1], 2),
+           vtest1 = round(acm$quali.sup$v.test[, 1], 1),
+           eje3 = round(acm$quali.sup$coord[, 3], 2),
+           vtest3 = round(acm$quali.sup$v.test[, 3], 1))
+
+round(acm$quali.sup$eta2[, 1:3], 3)
+```
+
+```{r guardar_eta, include=FALSE}
+eta_sup <- acm$quali.sup$eta2
+```
+
+El hallazgo central del taller está en esta tabla: en el eje 1, el país tiene un η² de `r round(eta_sup["pais", 1], 3)`, mientras que educación (`r round(eta_sup["educ", 1], 3)`), riqueza (`r round(eta_sup["riqueza", 1], 3)`) y género (`r round(eta_sup["genero", 1], 3)`) prácticamente no se relacionan con la oposición adhesión/desafección. **El contexto nacional pesa mucho más que la posición social** en la estructuración de estas actitudes.
+
+```{r plano_paises, fig.height=7.5}
+sup <- as.data.frame(acm$quali.sup$coord[, 1:3]) |>
+  tibble::rownames_to_column("modalidad") |>
+  mutate(tipo = case_when(modalidad %in% levels(datos$pais) ~ "País",
+                          grepl("Educ", modalidad) ~ "Educación",
+                          grepl("Riqueza", modalidad) ~ "Riqueza",
+                          TRUE ~ "Género"))
+
+colores_sup <- c("País" = "#C0392B", "Educación" = "#2471A3",
+                 "Riqueza" = "#229954", "Género" = "#7D3C98")
+
+ggplot(sup, aes(`Dim 1`, `Dim 2`, colour = tipo)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = "grey60") +
+  geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
+  geom_point(size = 2.5) +
+  geom_text_repel(aes(label = modalidad), size = 3.4, max.overlaps = 30,
+                  show.legend = FALSE) +
+  scale_colour_manual(values = colores_sup) +
+  labs(title = "Proyección de países y posiciones sociales (suplementarias), plano 1-2",
+       subtitle = "Ojo con la escala: estas modalidades están mucho más cerca del centro que las activas",
+       x = "Eje 1: adhesión ← → desafección", y = "Eje 2: efecto Guttman",
+       colour = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+Los países también se diferencian en el eje 3 (eficacia ↔ fatalismo):
+
+```{r plano_paises_13, fig.height=6.5}
+ggplot(sup |> filter(tipo == "País"), aes(`Dim 1`, `Dim 3`)) +
+  geom_hline(yintercept = 0, linetype = 2, colour = "grey60") +
+  geom_vline(xintercept = 0, linetype = 2, colour = "grey60") +
+  geom_point(size = 2.5, colour = "#C0392B") +
+  geom_text_repel(aes(label = modalidad), size = 3.6, colour = "#C0392B") +
+  labs(title = "Países en el plano 1-3",
+       x = "Eje 1: adhesión ← → desafección",
+       y = "Eje 3: eficacia (org. comunitaria) ↓   ↑ fatalismo (\"no es posible\")") +
+  theme_minimal(base_size = 12)
+```
+
+Algunas lecturas posibles:
+
+- **El Salvador** ocupa el extremo del polo de adhesión. En 2023, el país combinaba la confianza más alta en Fuerzas Armadas de la muestra con una satisfacción con la democracia muy elevada, en el contexto del régimen de excepción del gobierno de Nayib Bukele.
+- **Uruguay** y **Chile** también se ubican del lado de la adhesión, pero con otro perfil: su posición descansa más en el apoyo a la democracia como régimen y menos en la confianza en las Fuerzas Armadas que la de El Salvador.
+- **Bolivia, Perú, Honduras y Paraguay** se ubican del lado de la desafección.
+- **Colombia** está del lado de la desafección en el eje 1 y en el polo del fatalismo en el eje 3.
+
+Compruébelo con tablas de perfiles por país:
+
+```{r perfiles_pais}
+perfil <- function(var) {
+  datos |>
+    count(pais, modalidad = .data[[var]], wt = peso) |>
+    group_by(pais) |>
+    mutate(pct = round(100 * n / sum(n))) |>
+    select(-n) |>
+    pivot_wider(names_from = modalidad, values_from = pct)
+}
+
+perfil("ffaa")
+perfil("apoyo_dem")
+perfil("satis_dem")
+```
+
+> **Pregunta clave para la discusión:** El Salvador y Uruguay están del mismo lado del eje 1. ¿Significa eso que tienen la misma cultura política? Compare sus perfiles. ¿Qué nos dice esto sobre los límites de un eje como resumen y sobre la necesidad de volver siempre a los datos?
+
+## La nube de individuos por país
+
+Las modalidades suplementarias son *centros de gravedad*. Para ver la dispersión dentro de cada país, graficamos a los individuos con **elipses de concentración**:
+
+```{r nube_individuos, fig.height=7}
+ind <- as.data.frame(acm$ind$coord[, 1:2]) |>
+  mutate(pais = datos$pais)
+
+seleccion <- c("El Salvador", "Uruguay", "Colombia", "Perú")
+
+ind_sel <- ind |> filter(pais %in% seleccion)
+centros <- ind_sel |> group_by(pais) |>
+  summarise(`Dim 1` = mean(`Dim 1`), `Dim 2` = mean(`Dim 2`))
+
+ggplot(ind_sel, aes(`Dim 1`, `Dim 2`, colour = pais)) +
+  geom_jitter(alpha = 0.12, size = 0.8, width = 0.03, height = 0.03) +
+  stat_ellipse(level = 0.68, linewidth = 1.1) +
+  geom_point(data = centros, size = 5, shape = 18) +
+  labs(title = "Individuos de cuatro países en el plano 1-2",
+       subtitle = "Elipses que contienen aprox. 68 % de los casos de cada país",
+       x = "Eje 1: adhesión ← → desafección", y = "Eje 2", colour = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+(Detalle técnico: los rombos son los promedios de los individuos de cada país. En los gráficos anteriores, `FactoMineR` reporta las modalidades en otra escala, dividida por la raíz del valor propio; por eso los números no coinciden, aunque el orden y las distancias relativas son las mismas.)
+
+Las elipses se superponen ampliamente: **dentro de cada país hay mucha diversidad**. Las diferencias entre países son reales, pero son diferencias de grado en la distribución, no "culturas nacionales" homogéneas. Esta es una advertencia contra la falacia ecológica.
+
+# Tipología de culturas políticas (HCPC)
+
+El ACM produce coordenadas continuas para cada persona. Podemos usarlas para construir una **tipología** mediante clasificación jerárquica ascendente (método de Ward), consolidada con k-medias. `HCPC()` lo hace en un solo paso. Usamos los tres primeros ejes, que son los que interpretamos.
+
+```{r hcpc}
+acm3 <- MCA(datos |> select(ffaa, policia, apoyo_dem, satis_dem, cambio,
+                            educ, riqueza, genero, pais),
+            quali.sup = 6:9, row.w = datos$peso, ncp = 3, graph = FALSE)
+
+set.seed(2026)
+# kk = 100: preagrupa en 100 grupos con k-medias para que el árbol sea manejable con ~19.000 casos
+tipologia <- HCPC(acm3, nb.clust = -1, min = 3, max = 6, kk = 100,
+                  consol = FALSE, graph = FALSE)
+
+table(tipologia$data.clust$clust)
+```
+
+`nb.clust = -1` deja que la función corte el árbol donde la ganancia de inercia es mayor. Para describir cada clase, se listan las modalidades **sobrerrepresentadas** (v.test > 0):
+
+```{r describir_clases}
+for (k in names(tipologia$desc.var$category)) {
+  cat("\n================ Clase", k, "================\n")
+  x <- tipologia$desc.var$category[[k]]
+  x <- x[x[, "v.test"] > 0, c("Cla/Mod", "Mod/Cla", "Global")]
+  print(round(head(x, 8), 1))
+}
+```
+
+Cómo leer las columnas:
+
+- **Mod/Cla**: porcentaje de personas de la clase que tienen la modalidad.
+- **Global**: porcentaje en toda la muestra. Si Mod/Cla es mucho mayor que Global, la modalidad caracteriza la clase.
+- **Cla/Mod**: porcentaje de quienes tienen la modalidad que caen en esa clase.
+
+```{r grafico_clases, fig.height=7}
+clases <- as.data.frame(acm3$ind$coord[, 1:2]) |>
+  mutate(clase = tipologia$data.clust$clust)
+
+centros_clase <- clases |> group_by(clase) |>
+  summarise(`Dim 1` = mean(`Dim 1`), `Dim 2` = mean(`Dim 2`))
+
+ggplot(clases, aes(`Dim 1`, `Dim 2`, colour = clase)) +
+  geom_jitter(alpha = 0.15, size = 0.7, width = 0.03, height = 0.03) +
+  geom_point(data = centros_clase, size = 6, shape = 18, colour = "black") +
+  geom_point(data = centros_clase, size = 4, shape = 18) +
+  labs(title = "Tipología de culturas políticas en el plano 1-2",
+       x = "Eje 1: adhesión ← → desafección", y = "Eje 2", colour = "Clase") +
+  theme_minimal(base_size = 12)
+```
+
+```{r clases_por_pais}
+# ¿Cómo se distribuyen las clases en cada país? (porcentajes ponderados)
+datos |>
+  mutate(clase = tipologia$data.clust$clust) |>
+  count(pais, clase, wt = peso) |>
+  group_by(pais) |>
+  mutate(pct = round(100 * n / sum(n))) |>
+  select(-n) |>
+  pivot_wider(names_from = clase, values_from = pct, names_prefix = "Clase ")
+```
+
+> **Ejercicio en grupos (15 min):** póngale un **nombre sociológico** a cada clase (por ejemplo: "demócratas satisfechos", "desafectos radicales", "ambivalentes", "fatalistas"…). Justifique cada nombre con al menos tres modalidades sobrerrepresentadas. ¿Aparecen los "ciudadanos críticos" de Norris como clase propia?
+
+<details>
+<summary><b>Nota para el docente (abrir después del ejercicio)</b></summary>
+
+Con la semilla fijada, la clasificación produce tres clases de tamaño similar que reproducen la lectura de los ejes:
+
+- **Adhesión institucional:** confianza alta en Policía y Fuerzas Armadas, satisfacción con la democracia, vía electoral. Sobrerrepresentada en El Salvador (cerca de dos tercios de su muestra), Uruguay y Chile.
+- **Ambivalencia / posiciones intermedias:** confianza media en ambas instituciones, neutralidad frente a la democracia, organización comunitaria u "otras maneras" de cambio. Es la clase que materializa el efecto Guttman del eje 2.
+- **Desafección:** desconfianza en ambas instituciones, rechazo a la democracia como mejor régimen, insatisfacción intensa, fatalismo y protesta. Pesa más en República Dominicana, Bolivia, Honduras y Perú; en Colombia es la clase más frecuente.
+
+Los "ciudadanos críticos" (apoyan la democracia pero están insatisfechos) no forman una clase propia en este espacio: quedan repartidos entre la clase ambivalente y la de desafección. Es un buen punto de discusión sobre lo que el ACM agrupa y lo que no.
+
+</details>
+
+# El caso colombiano
+
+¿Se reproduce la misma estructura dentro de un solo país? Estimemos el ACM solo para Colombia. Ahora el país ya no es suplementario, y podemos preguntar si la **posición social** importa más cuando el contexto nacional se mantiene constante.
+
+```{r colombia}
+co <- datos |> filter(pais == "Colombia")
+nrow(co)
+
+acm_co <- MCA(co |> select(ffaa, policia, apoyo_dem, satis_dem, cambio,
+                           educ, riqueza, genero),
+              quali.sup = 6:8, row.w = co$peso, graph = FALSE)
+
+benzecri(acm_co$eig[, 1], Q = 5)
+round(acm_co$var$eta2[, 1:3], 3)
+```
+
+```{r colombia_plano, fig.height=7.5}
+fviz_mca_var(acm_co, repel = TRUE,
+             col.var = "#2E86C1", col.quali.sup = "#C0392B",
+             title = "Colombia 2023: modalidades activas (azul) y suplementarias (rojo)")
+```
+
+```{r colombia_vtest}
+round(acm_co$quali.sup$v.test[, 1:3], 1)
+round(acm_co$quali.sup$eta2[, 1:3], 3)
+```
+
+Preguntas para el caso colombiano:
+
+1. ¿El primer eje en Colombia tiene la misma estructura que en el análisis regional? ¿Qué modalidades cambian de posición?
+2. ¿Qué modalidades suplementarias tienen |v.test| > 2? ¿Son relaciones fuertes o solo "significativas"? (Mire los η²).
+3. Colombia aparecía del lado del fatalismo en el eje 3 regional. ¿Cómo lo relacionaría con la historia reciente del país (estallido social de 2021, cambio de gobierno en 2022, procesos de paz)?
+
+# Ejercicios
+
+**Ejercicio 1. Sensibilidad a las decisiones de recodificación.** Repita el ACM regional con la confianza en Policía y Fuerzas Armadas recodificada en **dos** modalidades (1–4 baja/media y 5–7 alta). ¿Desaparece el efecto Guttman del eje 2? ¿Cambia la interpretación del eje 1?
+
+**Ejercicio 2. Otra configuración del espacio.** Pase `apoyo_dem` a variable suplementaria y deje como activas solo las confianzas, la satisfacción y el repertorio de cambio. ¿Dónde se proyecta ahora el apoyo a la democracia? ¿Qué nos dice esto sobre la relación entre apoyo difuso y confianza en instituciones coercitivas?
+
+**Ejercicio 3. Comparar dos países.** Elija dos países que se ubiquen en polos opuestos del eje 1 y estime un ACM para cada uno. ¿La estructura de las oposiciones es la misma? Escriba un párrafo de interpretación.
+
+**Ejercicio 4 (tarea).** Descargue la base completa de Colombia 2023 del Barómetro de las Américas en <http://datasets.americasbarometer.org/database/> (gratuita, aceptando términos de uso). Construya un ACM con un conjunto propio de 6 a 8 preguntas de cultura política (por ejemplo, confianza en el Congreso y los partidos, tolerancia política, justificación de golpes militares, ideología) y use como suplementarias región, zona urbana/rural, edad y educación. Entregue un informe de dos páginas con: decisiones de recodificación, tabla de Benzécri, interpretación de dos ejes y un gráfico.
+
+# Para cerrar: ACM y pensamiento sociológico
+
+- El ACM es **descriptivo y relacional**: muestra estructuras de oposición, no efectos causales.
+- La distinción entre **activas y suplementarias** es teórica: decide qué espacio construimos y con qué lo explicamos.
+- Las **decisiones de recodificación** cambian el espacio: deben justificarse y someterse a pruebas de sensibilidad.
+- En estos datos, el espacio de la cultura política latinoamericana está organizado por una oposición entre **adhesión institucional** y **desafección**, y esa oposición se distribuye **más por contextos nacionales que por clase o educación**. Este resultado invita a pensar la cultura política como algo producido por experiencias de régimen, seguridad y desempeño estatal, más que como un simple reflejo de la posición social.
+
+# Referencias
+
+- Almond, G. y Verba, S. (1963). *The Civic Culture: Political Attitudes and Democracy in Five Nations*. Princeton University Press.
+- Bourdieu, P. (1979). *La distinction. Critique sociale du jugement*. Minuit. [Ed. en español: *La distinción*, Taurus].
+- Easton, D. (1975). A re-assessment of the concept of political support. *British Journal of Political Science*, 5(4), 435–457.
+- Greenacre, M. (2017). *Correspondence Analysis in Practice* (3.ª ed.). Chapman & Hall/CRC.
+- Husson, F., Lê, S. y Pagès, J. (2017). *Exploratory Multivariate Analysis by Example Using R* (2.ª ed.). Chapman & Hall/CRC.
+- LAPOP Lab. (2023). *AmericasBarometer 2023*. Vanderbilt University. <https://www.vanderbilt.edu/lapop/>
+- Le Roux, B. y Rouanet, H. (2010). *Multiple Correspondence Analysis*. SAGE (Quantitative Applications in the Social Sciences, 163).
+- Norris, P. (Ed.). (1999). *Critical Citizens: Global Support for Democratic Government*. Oxford University Press.
+- Norris, P. (2011). *Democratic Deficit: Critical Citizens Revisited*. Cambridge University Press.
+
+```{r sesion}
+sessionInfo()
+```

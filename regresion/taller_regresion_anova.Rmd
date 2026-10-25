@@ -1,0 +1,412 @@
+---
+title: "Taller: Regresión lineal y ANOVA con ejemplos sociológicos"
+subtitle: "Análisis Cuantitativo — Departamento de Sociología, Universidad del Rosario"
+author: "Oscar Maldonado"
+date: "`r format(Sys.Date(), '%d de %B de %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    highlight: tango
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE,
+                      fig.align = "center", fig.width = 7, fig.height = 4.5)
+```
+
+**Duración sugerida:** 2 horas.
+
+**Cómo usar este archivo:** ábralo en RStudio y ejecute cada bloque de código con el botón verde ▶ (o con `Ctrl + Enter` línea por línea; `Cmd + Enter` en Mac). Lea el texto antes de correr cada bloque y responda las **preguntas** en voz alta o en su cuaderno. Al final puede generar el documento completo con el botón **Knit**.
+
+## Objetivos {-}
+
+1. Entender la regresión lineal como una forma de describir cómo cambia, en promedio, una variable (ingreso) cuando cambia otra (educación).
+2. Interpretar coeficientes, valores p y R² en lenguaje sociológico.
+3. Usar el ANOVA para comparar promedios entre grupos sociales (por ejemplo, estratos).
+4. Descubrir que regresión y ANOVA son, en el fondo, el mismo modelo.
+
+# Preparación
+
+Instale los paquetes solo si no los tiene (se hace una única vez):
+
+```{r paquetes}
+paquetes <- c("ggplot2", "car", "carData")
+faltantes <- paquetes[!paquetes %in% installed.packages()[, "Package"]]
+if (length(faltantes) > 0) install.packages(faltantes)
+
+library(ggplot2)   # gráficos
+library(car)       # prueba de Levene
+library(carData)   # datos reales para el ejercicio final
+```
+
+# Los datos: una encuesta (ficticia) de hogares en Bogotá
+
+Vamos a **crear** los datos nosotros mismos. Esto tiene una ventaja pedagógica: como sabemos cómo se generaron, podemos comprobar si los modelos estadísticos "descubren" las relaciones que pusimos.
+
+> ⚠️ Son datos simulados, inspirados en patrones conocidos de la desigualdad en Colombia, pero **no son cifras reales**.
+
+```{r simulacion}
+set.seed(2026)   # fija el azar: todos obtenemos los mismos números
+n <- 400         # número de personas encuestadas
+
+encuesta <- data.frame(
+  sexo    = sample(c("Hombre", "Mujer"), n, replace = TRUE),
+  edad    = sample(18:65, n, replace = TRUE),
+  estrato = sample(1:6, n, replace = TRUE,
+                   prob = c(0.10, 0.33, 0.35, 0.14, 0.05, 0.03))
+)
+
+# Años de educación: dependen del estrato (origen social)
+encuesta$educacion <- round(rnorm(n, mean = 7 + 1.5 * encuesta$estrato, sd = 2.5))
+encuesta$educacion <- pmin(pmax(encuesta$educacion, 0), 22)
+```
+
+El ingreso mensual (en **miles de pesos**) lo construimos así:
+
+- cada año de educación suma **150 mil** pesos;
+- cada estrato adicional suma **120 mil** pesos;
+- ser mujer resta **250 mil** pesos (brecha salarial de género);
+- cada año de edad suma **8 mil** pesos (experiencia);
+- más un componente aleatorio: todo lo que no medimos.
+
+```{r ingreso}
+encuesta$ingreso <- 400 +
+  150 * encuesta$educacion +
+  120 * encuesta$estrato -
+  250 * (encuesta$sexo == "Mujer") +
+    8 * encuesta$edad +
+  rnorm(n, mean = 0, sd = 450)
+encuesta$ingreso <- round(pmax(encuesta$ingreso, 300))
+
+# Agrupamos el estrato en tres categorías (variable categórica / factor)
+encuesta$estrato_grupo <- cut(encuesta$estrato,
+                              breaks = c(0, 2, 4, 6),
+                              labels = c("Bajo (1-2)", "Medio (3-4)", "Alto (5-6)"))
+encuesta$sexo <- factor(encuesta$sexo, levels = c("Hombre", "Mujer"))
+```
+
+Miremos los datos:
+
+```{r mirar}
+head(encuesta)
+str(encuesta)
+summary(encuesta)
+```
+
+> **Pregunta 1.** ¿Qué tipo de variable es cada una (continua, discreta, nominal, ordinal)? ¿Cuál sería nuestra variable dependiente?
+
+# Exploración: antes de modelar, mirar
+
+```{r exploracion}
+# Promedios de ingreso por grupo
+aggregate(ingreso ~ sexo, data = encuesta, FUN = mean)
+aggregate(ingreso ~ estrato_grupo, data = encuesta, FUN = mean)
+
+# Correlación entre educación e ingreso (va de -1 a 1)
+cor(encuesta$educacion, encuesta$ingreso)
+```
+
+```{r dispersion}
+ggplot(encuesta, aes(x = educacion, y = ingreso)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Educación e ingreso",
+       x = "Años de educación",
+       y = "Ingreso mensual (miles de $)") +
+  theme_minimal()
+```
+
+> **Pregunta 2.** ¿Qué forma tiene la nube de puntos? ¿La relación parece positiva, negativa o inexistente? ¿Es perfecta?
+
+# Regresión lineal simple
+
+**Pregunta sociológica:** ¿cuánto "rinde" un año más de educación en el mercado laboral? Es la lógica de los *retornos a la educación*.
+
+El modelo es una recta:
+
+$$\text{ingreso} = a + b \cdot \text{educación} + \text{error}$$
+
+- $a$ (intercepto): ingreso esperado con 0 años de educación.
+- $b$ (pendiente): cambio promedio en el ingreso por cada año adicional de educación.
+
+```{r modelo1}
+modelo1 <- lm(ingreso ~ educacion, data = encuesta)
+summary(modelo1)
+```
+
+**Cómo leer la salida:**
+
+- **Estimate** de `educacion`: la pendiente $b$. Cuántos miles de pesos más gana, *en promedio*, alguien con un año más de educación.
+- **Pr(>|t|)**: valor p. Si es menor que 0.05, decimos que la relación es estadísticamente significativa (difícilmente es fruto del azar).
+- **Multiple R-squared (R²)**: proporción de la variación del ingreso que "explica" la educación (entre 0 y 1).
+
+```{r coeficientes}
+coef(modelo1)        # solo los coeficientes
+confint(modelo1)     # intervalos de confianza al 95%
+```
+
+Dibujamos la recta de regresión sobre los puntos:
+
+```{r recta}
+ggplot(encuesta, aes(x = educacion, y = ingreso)) +
+  geom_point(alpha = 0.4) +
+  geom_smooth(method = "lm", se = TRUE, color = "darkred") +
+  labs(title = "Recta de regresión: ingreso según educación",
+       x = "Años de educación", y = "Ingreso mensual (miles de $)") +
+  theme_minimal()
+```
+
+**Predicción:** ¿cuánto esperaríamos que gane alguien con bachillerato (11 años) y alguien con pregrado completo (16 años)?
+
+```{r prediccion}
+predict(modelo1, newdata = data.frame(educacion = c(11, 16)))
+```
+
+> **Pregunta 3.** Al simular, dijimos que cada año de educación suma 150 mil pesos. ¿El modelo estima más o menos que eso? ¿Por qué creen que ocurre? *(Pista: ¿qué otra variable afecta tanto la educación como el ingreso?)*
+
+# Regresión lineal múltiple: controlar por otras variables
+
+El origen social (estrato) influye en la educación **y** en el ingreso. Si no lo incluimos, le atribuimos a la educación un efecto que en parte es del estrato. Esto se llama **sesgo por variable omitida**.
+
+```{r modelo2}
+modelo2 <- lm(ingreso ~ educacion + estrato + sexo + edad, data = encuesta)
+summary(modelo2)
+```
+
+**Cómo leer la salida ahora:**
+
+- `educacion`: efecto de un año más de educación **manteniendo constantes** estrato, sexo y edad (*ceteris paribus*).
+- `sexoMujer`: diferencia promedio de ingreso entre mujeres y hombres con la **misma** educación, estrato y edad. La categoría que no aparece (Hombre) es la de referencia.
+
+Comparemos el coeficiente de educación en ambos modelos y el ajuste:
+
+```{r comparar}
+c(simple   = coef(modelo1)["educacion"],
+  multiple = coef(modelo2)["educacion"])
+
+# R² ajustado
+c(modelo1 = summary(modelo1)$adj.r.squared,
+  modelo2 = summary(modelo2)$adj.r.squared)
+```
+
+> **Pregunta 4.** Interprete el coeficiente de `sexoMujer` en una frase que entendería alguien sin formación estadística. ¿Qué nos dice sobre la desigualdad de género en el mercado laboral?
+>
+> **Pregunta 5.** Que un coeficiente sea significativo, ¿prueba que la educación *causa* mayores ingresos? ¿Qué más necesitaríamos?
+
+## Revisar los supuestos (diagnóstico rápido)
+
+La regresión supone, entre otras cosas, que los errores (residuos) no tienen patrones: se reparten al azar alrededor de cero y con una dispersión parecida a lo largo de los valores predichos.
+
+```{r diagnostico, fig.height=7}
+par(mfrow = c(2, 2))   # 4 gráficos en una ventana
+plot(modelo2)
+par(mfrow = c(1, 1))   # volvemos a 1 gráfico por ventana
+```
+
+- **Residuals vs Fitted:** buscamos una nube sin forma.
+- **Q-Q:** los puntos deberían seguir la diagonal (normalidad de los residuos).
+
+# ANOVA de una vía: comparar promedios entre grupos
+
+**Pregunta sociológica:** ¿el ingreso promedio es distinto entre estratos bajos, medios y altos?
+
+El ANOVA compara la variación **entre** grupos con la variación **dentro** de los grupos. Si las diferencias entre grupos son grandes en comparación con la dispersión interna, el estadístico F es grande.
+
+- $H_0$ (hipótesis nula): todos los grupos tienen el mismo promedio.
+- $H_1$: al menos un grupo tiene un promedio distinto.
+
+Primero, visualizar:
+
+```{r boxplot}
+ggplot(encuesta, aes(x = estrato_grupo, y = ingreso, fill = estrato_grupo)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  stat_summary(fun = mean, geom = "point", shape = 18, size = 4) +
+  labs(title = "Ingreso según estrato socioeconómico",
+       subtitle = "El rombo indica el promedio de cada grupo",
+       x = "Estrato", y = "Ingreso mensual (miles de $)") +
+  theme_minimal()
+```
+
+El ANOVA:
+
+```{r anova1}
+anova1 <- aov(ingreso ~ estrato_grupo, data = encuesta)
+summary(anova1)
+```
+
+**Cómo leer la salida:**
+
+- **Df:** grados de libertad (número de grupos − 1; y n − número de grupos).
+- **F value:** razón entre la variación entre grupos y la variación dentro de los grupos.
+- **Pr(>F):** valor p. Si es < 0.05, rechazamos $H_0$: los promedios **no** son todos iguales.
+
+El ANOVA dice *que* hay diferencias, pero no *entre quiénes*. Para eso usamos comparaciones *post hoc* (prueba de Tukey):
+
+```{r tukey}
+TukeyHSD(anova1)
+```
+
+`diff` es la diferencia de promedios; `p adj` es el valor p ajustado por hacer muchas comparaciones a la vez.
+
+Supuesto de varianzas iguales entre grupos (prueba de Levene). Si p < 0.05, las varianzas difieren y conviene ser cautelosos:
+
+```{r levene}
+leveneTest(ingreso ~ estrato_grupo, data = encuesta)
+```
+
+> **Pregunta 6.** Según Tukey, ¿todos los pares de estratos difieren entre sí? Redacte una conclusión de dos líneas para un informe.
+
+## ANOVA de dos vías: estrato y sexo
+
+¿La brecha de género es igual en todos los estratos? Eso lo pregunta la **interacción** (`estrato_grupo:sexo`).
+
+```{r anova2}
+anova2 <- aov(ingreso ~ estrato_grupo * sexo, data = encuesta)
+summary(anova2)
+```
+
+Gráfico de interacción: si las líneas son paralelas, la brecha de género es parecida en todos los estratos (no hay interacción).
+
+```{r interaccion}
+promedios <- aggregate(ingreso ~ estrato_grupo + sexo, data = encuesta, FUN = mean)
+
+ggplot(promedios, aes(x = estrato_grupo, y = ingreso, color = sexo, group = sexo)) +
+  geom_point(size = 3) +
+  geom_line(linewidth = 1) +
+  labs(title = "Ingreso promedio por estrato y sexo",
+       x = "Estrato", y = "Ingreso promedio (miles de $)", color = "Sexo") +
+  theme_minimal()
+```
+
+> **Pregunta 7.** ¿Es significativa la interacción? ¿Qué significaría, sociológicamente, que sí lo fuera?
+
+# La gran revelación: ANOVA y regresión son el mismo modelo
+
+Si metemos una variable categórica en `lm()`, R la convierte en variables *dummy* (0/1). El resultado es idéntico al ANOVA.
+
+```{r modelo3}
+modelo3 <- lm(ingreso ~ estrato_grupo, data = encuesta)
+summary(modelo3)
+anova(modelo3)     # compare con summary(anova1): ¡mismo F y mismo p!
+```
+
+Los coeficientes de la regresión son las diferencias de promedios respecto a la categoría de referencia (`Bajo (1-2)`):
+
+```{r dummies}
+coef(modelo3)
+aggregate(ingreso ~ estrato_grupo, data = encuesta, FUN = mean)
+```
+
+> **Pregunta 8.** Verifique a mano: intercepto + coeficiente de "Medio", ¿da el promedio del estrato medio?
+
+**Moraleja:** la regresión con una variable categórica *es* un ANOVA. Ambos pertenecen a la familia del **modelo lineal general**.
+
+# Ejercicio final con datos reales: prestigio ocupacional
+
+Datos clásicos de la sociología de la estratificación: 102 ocupaciones en Canadá (1971), con su puntaje de prestigio (escala Pineo-Porter).
+
+| Variable    | Descripción                                                    |
+|-------------|----------------------------------------------------------------|
+| `prestige`  | Puntaje de prestigio de la ocupación                           |
+| `education` | Años promedio de educación de quienes la ejercen               |
+| `income`    | Ingreso promedio (dólares de 1971)                             |
+| `women`     | % de mujeres en la ocupación                                   |
+| `type`      | Tipo: `bc` (obrera/manual), `wc` (oficina), `prof` (profesional) |
+
+```{r prestige}
+data(Prestige)
+prestigio <- na.omit(Prestige)   # quitamos 4 ocupaciones sin tipo
+head(prestigio)
+```
+
+Para ver la documentación completa del dataset, ejecute en la consola:
+
+```{r ayuda, eval=FALSE}
+?Prestige
+```
+
+**En grupos de 3**, completen el código (reemplacen `____`) y respondan. Estos bloques no se ejecutan al hacer *Knit* hasta que ustedes los completen y cambien `eval=FALSE` por `eval=TRUE`.
+
+**7.1 Regresión simple.** ¿Cuánto aumenta el prestigio con cada año de educación promedio de la ocupación?
+
+```{r ej71, eval=FALSE}
+m_a <- lm(prestige ~ ____, data = prestigio)
+summary(m_a)
+```
+
+**7.2 Regresión múltiple.** Agreguen ingreso (en miles) y % de mujeres. ¿Las ocupaciones feminizadas tienen menos prestigio, a igual educación e ingreso?
+
+```{r ej72, eval=FALSE}
+prestigio$income_miles <- prestigio$income / 1000
+m_b <- lm(prestige ~ education + ____ + ____, data = prestigio)
+summary(m_b)
+```
+
+**7.3 ANOVA.** ¿Difiere el prestigio promedio según el tipo de ocupación?
+
+```{r ej73, eval=FALSE}
+a_c <- aov(prestige ~ ____, data = prestigio)
+summary(a_c)
+TukeyHSD(a_c)
+```
+
+**7.4** Hagan un boxplot del prestigio según tipo de ocupación.
+
+```{r ej74, eval=FALSE}
+# Escriban aquí su código
+
+```
+
+**7.5 Discusión.** ¿Qué dice este ejercicio sobre la relación entre credenciales educativas, recompensas económicas y reconocimiento social (en la línea de Weber y de Bourdieu)?
+
+# Resumen para llevar
+
+| Pregunta                                   | Técnica           | Función R          |
+|--------------------------------------------|-------------------|--------------------|
+| ¿Cómo cambia Y cuando cambia X numérica?   | Regresión simple  | `lm(y ~ x)`        |
+| ¿Y el efecto de X controlando por otras?   | Regresión múltiple| `lm(y ~ x1 + x2)`  |
+| ¿Difieren los promedios entre grupos?      | ANOVA de una vía  | `aov(y ~ grupo)`   |
+| ¿Entre cuáles grupos?                      | Post hoc de Tukey | `TukeyHSD()`       |
+| ¿El efecto de un grupo depende de otro?    | ANOVA de dos vías | `aov(y ~ a * b)`   |
+
+**Advertencias:**
+
+- Significancia estadística ≠ relevancia sociológica: mire también el tamaño de los coeficientes.
+- Asociación ≠ causalidad.
+- Siempre grafique antes de modelar.
+
+```{r docente, include=FALSE}
+# =====================================================================
+# SOLUCIONES (para el docente). Este bloque no aparece en el documento
+# compilado (include = FALSE). Bórrelo antes de compartir el .Rmd con
+# los estudiantes.
+# =====================================================================
+# m_a <- lm(prestige ~ education, data = prestigio); summary(m_a)
+# prestigio$income_miles <- prestigio$income / 1000
+# m_b <- lm(prestige ~ education + income_miles + women, data = prestigio)
+# summary(m_b)
+# a_c <- aov(prestige ~ type, data = prestigio); summary(a_c); TukeyHSD(a_c)
+# ggplot(prestigio, aes(type, prestige, fill = type)) +
+#   geom_boxplot(show.legend = FALSE) + theme_minimal()
+#
+# Resultados esperados (con set.seed(2026)):
+#  - Modelo 1 (encuesta): educación ≈ 191 mil por año (sobreestima los
+#    150 "verdaderos" porque omite el estrato). R² ≈ 0.56.
+#  - Modelo 2: educación ≈ 162; estrato ≈ 134; mujer ≈ -232; edad ≈ 8.7.
+#    R² ajustado sube a ≈ 0.63. El sesgo por variable omitida se reduce.
+#  - ANOVA estrato: F ≈ 74.7, p < 0.001; Tukey: los tres pares difieren.
+#    Levene p ≈ 0.74 (varianzas homogéneas).
+#  - ANOVA dos vías: interacción estrato × sexo NO significativa
+#    (p ≈ 0.86): la brecha de género es similar en todos los estratos,
+#    tal como se simuló.
+#  - Prestige 7.1: ≈ 5.4 puntos de prestigio por año de educación.
+#  - Prestige 7.2: educación ≈ 4.4; ingreso ≈ 1.2 por cada mil dólares;
+#    % mujeres ≈ -0.01 y NO significativo (p ≈ 0.67). Buena discusión:
+#    la feminización no reduce el prestigio una vez controlados
+#    educación e ingreso, ¿o el castigo opera vía el ingreso?
+#  - Prestige 7.3: F ≈ 109.6; prof > wc > bc, todos los pares difieren
+#    (wc-bc con p ≈ 0.02).
+```
